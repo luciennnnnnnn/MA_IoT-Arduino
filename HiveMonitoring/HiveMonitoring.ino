@@ -1,4 +1,12 @@
-#include "src/SwitchHandler.h"
+#include "Seeed_vl53l0x.h"
+Seeed_vl53l0x VL53L0X;
+
+#ifdef ARDUINO_SAMD_VARIANT_COMPLIANCE
+    #define SERIAL SerialUSB
+#else
+    #define SERIAL Serial
+#endif
+
 #include "LIS3DHTR.h"
 #include <Wire.h>
 
@@ -6,6 +14,7 @@
 LIS3DHTR<TwoWire> LIS;
 #define WIRE Wire
 
+#include "src/SwitchHandler.h"
 // Define the pin for the switch
 #define SWITCH_PIN 1
 
@@ -13,10 +22,23 @@ LIS3DHTR<TwoWire> LIS;
 SwitchHandler switchHandler(SWITCH_PIN);
 
 void setup() {
+    VL53L0X_Error Status = VL53L0X_ERROR_NONE;
     // Initialize serial communication for debugging
     Serial.begin(115200);
     while (!Serial) {
       ; // Attendre que la connexion série soit établie
+    }
+    Status = VL53L0X.VL53L0X_common_init();
+    if (VL53L0X_ERROR_NONE != Status) {
+        SERIAL.println("start vl53l0x mesurement failed!");
+        VL53L0X.print_pal_error(Status);
+        while (1);
+    }
+    VL53L0X.VL53L0X_continuous_ranging_init();
+    if (VL53L0X_ERROR_NONE != Status) {
+        SERIAL.println("start vl53l0x mesurement failed!");
+        VL53L0X.print_pal_error(Status);
+        while (1);
     }
 
     // Initialiser le bus I2C
@@ -76,6 +98,14 @@ void loop() {
         Serial.println("Switch is OFF");
     }
 
+    VL53L0X_RangingMeasurementData_t RangingMeasurementData;
+    VL53L0X.PerformContinuousRangingMeasurement(&RangingMeasurementData);
+    if (RangingMeasurementData.RangeMilliMeter >= 2000) {
+        SERIAL.println("out of ranger");
+    } else {
+        SERIAL.print("distance::");
+        SERIAL.println(RangingMeasurementData.RangeMilliMeter);
+    }
     // Add a small delay to avoid flooding the serial monitor
     delay(500);
 }
