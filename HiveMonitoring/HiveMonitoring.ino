@@ -21,6 +21,10 @@ LIS3DHTR<TwoWire> LIS;
 // Create a SwitchHandler object
 SwitchHandler switchHandler(SWITCH_PIN);
 
+#include "AHT20.h"
+
+AHT20 AHT;
+
 void setup() {
     VL53L0X_Error Status = VL53L0X_ERROR_NONE;
     // Initialize serial communication for debugging
@@ -63,6 +67,9 @@ void setup() {
     
     // Initialize the switch handler
     switchHandler.begin();
+
+    Serial.println("AHT20 sensor init.");
+    AHT.begin();
 }
 
 void loop() {
@@ -107,5 +114,20 @@ void loop() {
         SERIAL.println(RangingMeasurementData.RangeMilliMeter);
     }
     // Add a small delay to avoid flooding the serial monitor
+    float humi, temp;
+    
+    int ret = AHT.getSensor(&humi, &temp);
+    
+    if(ret)     // GET DATA OK
+    {
+        Serial.print("humidity: ");
+        Serial.print(humi*100);
+        Serial.print("%\t temperature: ");
+        Serial.println(temp);
+    }
+    else        // GET DATA FAIL
+    {
+        Serial.println("GET DATA FROM AHT20 FAIL");
+    }
     delay(500);
 }
