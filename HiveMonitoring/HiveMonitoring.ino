@@ -1,133 +1,150 @@
+#include <CayenneLPP.h>
 #include "Seeed_vl53l0x.h"
+#include "LIS3DHTR.h"
+#include <Wire.h>
+#include "src/SwitchHandler.h"
+#include "AHT20.h"
+
+// VL53L0X Time-of-Flight sensor object
 Seeed_vl53l0x VL53L0X;
 
+// Define the serial port depending on the board
 #ifdef ARDUINO_SAMD_VARIANT_COMPLIANCE
     #define SERIAL SerialUSB
 #else
     #define SERIAL Serial
 #endif
 
-#include "LIS3DHTR.h"
-#include <Wire.h>
-
-// Définir un objet LIS3DHTR pour l'interface I2C
+// Define LIS3DHTR accelerometer object
 LIS3DHTR<TwoWire> LIS;
 #define WIRE Wire
 
-#include "src/SwitchHandler.h"
-// Define the pin for the switch
+// Define pin for the switch and switch handler object
 #define SWITCH_PIN 1
-
-// Create a SwitchHandler object
 SwitchHandler switchHandler(SWITCH_PIN);
 
-#include "AHT20.h"
-
+// AHT20 temperature and humidity sensor object
 AHT20 AHT;
 
+// CayenneLPP object for formatting data
+CayenneLPP lpp(51);
+
 void setup() {
-    VL53L0X_Error Status = VL53L0X_ERROR_NONE;
     // Initialize serial communication for debugging
-    Serial.begin(115200);
-    while (!Serial) {
-      ; // Attendre que la connexion série soit établie
+    SERIAL.begin(115200);
+    while (!SERIAL) {
+        ; // Wait for the serial connection to establish
     }
-    Status = VL53L0X.VL53L0X_common_init();
-    if (VL53L0X_ERROR_NONE != Status) {
-        SERIAL.println("start vl53l0x mesurement failed!");
+
+    // Initialize VL53L0X
+    VL53L0X_Error Status = VL53L0X.VL53L0X_common_init();
+    if (Status != VL53L0X_ERROR_NONE) {
+        SERIAL.println("Failed to initialize VL53L0X!");
         VL53L0X.print_pal_error(Status);
         while (1);
     }
+
     VL53L0X.VL53L0X_continuous_ranging_init();
-    if (VL53L0X_ERROR_NONE != Status) {
-        SERIAL.println("start vl53l0x mesurement failed!");
+    if (Status != VL53L0X_ERROR_NONE) {
+        SERIAL.println("Failed to start continuous ranging for VL53L0X!");
         VL53L0X.print_pal_error(Status);
         while (1);
     }
 
-    // Initialiser le bus I2C
-    WIRE.begin();  // Utilise les broches par défaut SDA (GPIO 21) et SCL (GPIO 22)
-    // Si vous utilisez d'autres broches, spécifiez-les ici, par exemple : WIRE.begin(SDA_PIN, SCL_PIN);
+    // Initialize I2C bus
+    WIRE.begin();
 
-    // Initialiser le capteur avec l'adresse I2C mise à jour
-    LIS.begin(WIRE, LIS3DHTR_ADDRESS_UPDATED); // Adresse par défaut : 0x19
-    
-    // Vérifier si le capteur est connecté
-    if (!LIS.isConnection()) {
-      Serial.println("Impossible d'initialiser le capteur LIS3DHTR !");
-      while (1) {
-        ; // Boucle infinie si le capteur n'est pas détecté
-      }
+    // Initialize LIS3DHTR accelerometer
+    LIS.begin(WIRE, LIS3DHTR_ADDRESS_UPDATED); // The method returns void
+    if (!LIS.isConnection()) { // Use a method that verifies the connection
+        SERIAL.println("Failed to initialize LIS3DHTR!");
+        while (1);
     }
+    LIS.setOutputDataRate(LIS3DHTR_DATARATE_50HZ);
 
-    delay(100); // Attendre la stabilisation
-
-    // Configurer la fréquence de sortie des données
-    LIS.setOutputDataRate(LIS3DHTR_DATARATE_50HZ); // 50 Hz
-    
     // Initialize the switch handler
     switchHandler.begin();
 
-    Serial.println("AHT20 sensor init.");
-    AHT.begin();
+      // Initialize AHT20
+    SERIAL.println("Initializing AHT20 sensor...");
+    AHT.begin(); // Simple initialization, no return value
+
+    delay(100);  // Allow the sensor to stabilize after initialization
+
+    // Perform a quick test to ensure the sensor is operational
+    float humidity, temperature;
+    int status = AHT.getSensor(&humidity, &temperature);
+    if (status == 0) { // 0 indicates failure
+        SERIAL.println("Failed to initialize AHT20!");
+        while (1); // Stop execution if the sensor initialization fails
+    }
+
+    SERIAL.println("All sensors initialized successfully!");
 }
 
+
 void loop() {
-  // Vérifier si le capteur est connecté
+    // Check accelerometer connection
     if (!LIS.isConnection()) {
-      Serial.println("LIS3DHTR non connecté !");
-      while (1) {
-        ; // Boucle infinie si le capteur se déconnecte
-      }
-      return;
+        SERIAL.println("LIS3DHTR disconnected!");
+        while (1);
     }
 
-    // Lire les accélérations sur les 3 axes
-    Serial.print("x: ");
-    Serial.print(LIS.getAccelerationX());
-    Serial.print("  ");
-    
-    Serial.print("y: ");
-    Serial.print(LIS.getAccelerationY());
-    Serial.print("  ");
-    
-    Serial.print("z: ");
-    Serial.println(LIS.getAccelerationZ());
+    // Read accelerometer values
+    float ax = LIS.getAccelerationX();
+    float ay = LIS.getAccelerationY();
+    float az = LIS.getAccelerationZ();
+    SERIAL.print("Acceleration - X: ");
+    SERIAL.print(ax);
+    SERIAL.print(" Y: ");
+    SERIAL.print(ay);
+    SERIAL.print(" Z: ");
+    SERIAL.println(az);
 
+    // Add accelerometer data to CayenneLPP
+    lpp.addAccelerometer(1, ax, ay, az);
 
-    // Read the switch state
+    // Read switch state
     bool isSwitchOn = switchHandler.readSwitch();
+    SERIAL.println(isSwitchOn ? "Switch is ON" : "Switch is OFF");
+    lpp.addDigitalInput(2, isSwitchOn ? 1 : 0);
 
-    // Print the switch state to the serial monitor
-    if (isSwitchOn) {
-        Serial.println("Switch is ON");
-    } else {
-        Serial.println("Switch is OFF");
-    }
-
+    // Read distance from VL53L0X
     VL53L0X_RangingMeasurementData_t RangingMeasurementData;
     VL53L0X.PerformContinuousRangingMeasurement(&RangingMeasurementData);
     if (RangingMeasurementData.RangeMilliMeter >= 2000) {
-        SERIAL.println("out of ranger");
+        SERIAL.println("Distance: Out of range");
     } else {
-        SERIAL.print("distance::");
-        SERIAL.println(RangingMeasurementData.RangeMilliMeter);
+        SERIAL.print("Distance: ");
+        SERIAL.print(RangingMeasurementData.RangeMilliMeter);
+        SERIAL.println(" mm");
+        lpp.addDistance(3, RangingMeasurementData.RangeMilliMeter / 1000.0f); // Convert mm to meters
     }
-    // Add a small delay to avoid flooding the serial monitor
-    float humi, temp;
-    
-    int ret = AHT.getSensor(&humi, &temp);
-    
-    if(ret)     // GET DATA OK
-    {
-        Serial.print("humidity: ");
-        Serial.print(humi*100);
-        Serial.print("%\t temperature: ");
-        Serial.println(temp);
+
+    // Read temperature and humidity from AHT20
+    float humidity, temperature;
+    if (AHT.getSensor(&humidity, &temperature)) {
+        SERIAL.print("Humidity: ");
+        SERIAL.print(humidity * 100);
+        SERIAL.print("%, Temperature: ");
+        SERIAL.println(temperature);
+
+        lpp.addRelativeHumidity(4, humidity * 100); // Multiply by 100 for percentage
+        lpp.addTemperature(5, temperature);
+    } else {
+        SERIAL.println("Failed to read data from AHT20!");
     }
-    else        // GET DATA FAIL
-    {
-        Serial.println("GET DATA FROM AHT20 FAIL");
+
+    // Transmit CayenneLPP payload via serial for demonstration
+    SERIAL.print("CayenneLPP payload: ");
+    for (size_t i = 0; i < lpp.getSize(); i++) {
+        SERIAL.print(lpp.getBuffer()[i], HEX);
+        SERIAL.print(" ");
     }
-    delay(500);
+    SERIAL.println();
+
+    // Clear CayenneLPP buffer for next transmission
+    lpp.reset();
+
+    delay(500); // Delay to avoid flooding the serial monitor
 }
