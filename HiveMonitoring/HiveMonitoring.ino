@@ -4,6 +4,26 @@
 #include <Wire.h>
 #include "src/SwitchHandler.h"
 #include "AHT20.h"
+#include <math.h> // Pour sqrt et fabs
+
+#define SEUIL_FERME 100    // Distance en mm pour considérer "fermé"
+#define SEUIL_OUVERT 500   // Distance en mm pour considérer "ouvert"
+#define SEUIL_NORME 0.3    // Seuil pour la variation de la norme vectorielle
+#define TEMPORISATION_STATIQUE 5 // Nombre de cycles requis pour confirmer un état statique
+
+float lastNorme = 0.0; // Dernière valeur de la norme vectorielle
+int compteurStatique = 0; // Compteur pour temporisation
+int dernierEtatMouvement = 1; // Dernier état connu (1 = statique, 2 = en mouvement)
+
+// Fonction pour calculer la norme vectorielle
+float calculerNorme(float x, float y, float z) {
+    return sqrt(x * x + y * y + z * z);
+}
+
+// Fonction pour calculer une moyenne glissante
+float calculerMoyenne(float ancienneValeur, float nouvelleValeur, float facteur) {
+    return (ancienneValeur * (1.0 - facteur)) + (nouvelleValeur * facteur);
+}
 
 // VL53L0X Time-of-Flight sensor object
 Seeed_vl53l0x VL53L0X;
@@ -82,29 +102,15 @@ void setup() {
     SERIAL.println("All sensors initialized successfully!");
 }
 
-
-#include <math.h> // Pour sqrt et fabs
-
-#define SEUIL_FERME 100    // Distance en mm pour considérer "fermé"
-#define SEUIL_OUVERT 500   // Distance en mm pour considérer "ouvert"
-#define SEUIL_NORME 0.3    // Seuil pour la variation de la norme vectorielle
-#define TEMPORISATION_STATIQUE 5 // Nombre de cycles requis pour confirmer un état statique
-
-float lastNorme = 0.0; // Dernière valeur de la norme vectorielle
-int compteurStatique = 0; // Compteur pour temporisation
-int dernierEtatMouvement = 1; // Dernier état connu (1 = statique, 2 = en mouvement)
-
-// Fonction pour calculer la norme vectorielle
-float calculerNorme(float x, float y, float z) {
-    return sqrt(x * x + y * y + z * z);
-}
-
-// Fonction pour calculer une moyenne glissante
-float calculerMoyenne(float ancienneValeur, float nouvelleValeur, float facteur) {
-    return (ancienneValeur * (1.0 - facteur)) + (nouvelleValeur * facteur);
-}
-
 void loop() {
+    // Lire l'état du switch
+    bool switchState = switchHandler.readSwitch();
+    const char* descriptionSwitch = switchState ? "pressé" : "relaché";
+
+    // Afficher l'état du switch
+    SERIAL.print("État du switch : ");
+    SERIAL.println(descriptionSwitch);
+
     // ----- Capteur d'accélération -----
     if (!LIS.isConnection()) {
         SERIAL.println("LIS3DHTR disconnected!");
