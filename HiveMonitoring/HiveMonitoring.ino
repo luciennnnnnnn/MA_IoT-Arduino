@@ -83,68 +83,138 @@ void setup() {
 }
 
 
+#include <math.h> // Pour sqrt et fabs
+
+#define SEUIL_FERME 100    // Distance en mm pour considérer "fermé"
+#define SEUIL_OUVERT 500   // Distance en mm pour considérer "ouvert"
+#define SEUIL_NORME 0.3    // Seuil pour la variation de la norme vectorielle
+#define TEMPORISATION_STATIQUE 5 // Nombre de cycles requis pour confirmer un état statique
+
+float lastNorme = 0.0; // Dernière valeur de la norme vectorielle
+int compteurStatique = 0; // Compteur pour temporisation
+int dernierEtatMouvement = 1; // Dernier état connu (1 = statique, 2 = en mouvement)
+
+// Fonction pour calculer la norme vectorielle
+float calculerNorme(float x, float y, float z) {
+    return sqrt(x * x + y * y + z * z);
+}
+
+// Fonction pour calculer une moyenne glissante
+float calculerMoyenne(float ancienneValeur, float nouvelleValeur, float facteur) {
+    return (ancienneValeur * (1.0 - facteur)) + (nouvelleValeur * facteur);
+}
+
 void loop() {
-    // Check accelerometer connection
+    // ----- Capteur d'accélération -----
     if (!LIS.isConnection()) {
         SERIAL.println("LIS3DHTR disconnected!");
         while (1);
     }
 
-    // Read accelerometer values
+    // Lire les valeurs de l'accéléromètre
     float ax = LIS.getAccelerationX();
     float ay = LIS.getAccelerationY();
     float az = LIS.getAccelerationZ();
-    SERIAL.print("Acceleration - X: ");
-    SERIAL.print(ax);
-    SERIAL.print(" Y: ");
-    SERIAL.print(ay);
-    SERIAL.print(" Z: ");
-    SERIAL.println(az);
 
-    // Add accelerometer data to CayenneLPP
-    lpp.addAccelerometer(1, ax, ay, az);
+    // Calculer la norme vectorielle et lisser les variations
+    float normeActuelle = calculerNorme(ax, ay, az);
+    float normeLisse = calculerMoyenne(lastNorme, normeActuelle, 0.1); // Facteur de lissage 0.1
+    lastNorme = normeLisse;
 
-    // Read switch state
-    bool isSwitchOn = switchHandler.readSwitch();
-    SERIAL.println(isSwitchOn ? "Switch is ON" : "Switch is OFF");
-    lpp.addDigitalInput(2, isSwitchOn ? 1 : 0);
+    // Déterminer si la variation de la norme dépasse le seuil
+    float variationNorme = fabs(normeLisse - normeActuelle);
+    int nouvelEtatMouvement = (variationNorme > SEUIL_NORME) ? 2 : 1;
 
-    // Read distance from VL53L0X
+    // Appliquer une temporisation pour confirmer l'état statique
+    if (nouvelEtatMouvement == 1) {
+        compteurStatique++;
+        if (compteurStatique >= TEMPORISATION_STATIQUE) {
+            dernierEtatMouvement = 1; // Confirmer statique
+        }
+    } else {
+        compteurStatique = 0; // Réinitialiser le compteur si en mouvement
+        dernierEtatMouvement = 2;
+    }
+
+    const char* descriptionMouvement = (dernierEtatMouvement == 2) ? "en mouvement" : "statique";
+
+    // Affichage formaté pour l'accéléromètre
+    SERIAL.print("Accéléromètre : X");
+    SERIAL.print(ax, 2); // Limiter à 2 décimales
+    SERIAL.print(" Y");
+    SERIAL.print(ay, 2);
+    SERIAL.print(" Z");
+    SERIAL.print(az, 2);
+    SERIAL.print(", État de la ruche : ");
+    SERIAL.print(dernierEtatMouvement);
+    SERIAL.print(" (");
+    SERIAL.print(descriptionMouvement);
+    SERIAL.println(")");
+
+    // ----- Capteur de distance -----
     VL53L0X_RangingMeasurementData_t RangingMeasurementData;
     VL53L0X.PerformContinuousRangingMeasurement(&RangingMeasurementData);
+
+    int etatDistance = 0; // Par défaut
+    const char* descriptionDistance = "";
     if (RangingMeasurementData.RangeMilliMeter >= 2000) {
-        SERIAL.println("Distance: Out of range");
+        SERIAL.println("Distance: Hors de portée");
+        etatDistance = 3; // Considérer comme "ouvert" si hors de portée
+        descriptionDistance = "ouvert";
     } else {
-        SERIAL.print("Distance: ");
-        SERIAL.print(RangingMeasurementData.RangeMilliMeter);
-        SERIAL.println(" mm");
-        lpp.addDistance(3, RangingMeasurementData.RangeMilliMeter / 1000.0f); // Convert mm to meters
+        int distance = RangingMeasurementData.RangeMilliMeter;
+        if (distance <= SEUIL_FERME) {
+            etatDistance = 1; // Fermé
+            descriptionDistance = "fermé";
+        } else if (distance >= SEUIL_OUVERT) {
+            etatDistance = 3; // Ouvert
+            descriptionDistance = "ouvert";
+        } else {
+            etatDistance = 2; // En mouvement
+            descriptionDistance = "en mouvement";
+        }
+
+        // Affichage formaté pour la distance et l'état de la porte
+        SERIAL.print("Distance du capteur : ");
+        SERIAL.print(distance);
+        SERIAL.print(" mm, État de la porte : ");
+        SERIAL.print(etatDistance);
+        SERIAL.print(" (");
+        SERIAL.print(descriptionDistance);
+        SERIAL.println(")");
     }
 
-    // Read temperature and humidity from AHT20
-    float humidity, temperature;
-    if (AHT.getSensor(&humidity, &temperature)) {
-        SERIAL.print("Humidity: ");
-        SERIAL.print(humidity * 100);
-        SERIAL.print("%, Temperature: ");
-        SERIAL.println(temperature);
-
-        lpp.addRelativeHumidity(4, humidity * 100); // Multiply by 100 for percentage
-        lpp.addTemperature(5, temperature);
+    // ----- Capteur de température et d'humidité -----
+    float humidity = 0, temperature = 0;
+    bool ahtSuccess = AHT.getSensor(&humidity, &temperature);
+    if (ahtSuccess) {
+        SERIAL.print("Température : ");
+        SERIAL.print(temperature);
+        SERIAL.print(" °C, Humidité : ");
+        SERIAL.print(humidity * 100); // Multiplier par 100 pour obtenir le pourcentage
+        SERIAL.println(" %");
     } else {
-        SERIAL.println("Failed to read data from AHT20!");
+        SERIAL.println("Erreur de lecture du capteur AHT20 !");
     }
 
-    // Transmit CayenneLPP payload via serial for demonstration
-    SERIAL.print("CayenneLPP payload: ");
+    // ----- Ajout des données au payload CayenneLPP -----
+    lpp.addDigitalInput(6, dernierEtatMouvement); // État de mouvement
+    lpp.addDigitalInput(7, etatDistance);         // État de la distance
+    if (ahtSuccess) {
+        lpp.addTemperature(8, temperature);
+        lpp.addRelativeHumidity(9, humidity * 100); // Multiplier par 100 pour un format correct
+    }
+
+    // Transmettre le payload via le moniteur série
+    SERIAL.print("Payload CayenneLPP : ");
     for (size_t i = 0; i < lpp.getSize(); i++) {
         SERIAL.print(lpp.getBuffer()[i], HEX);
         SERIAL.print(" ");
     }
     SERIAL.println();
 
-    // Clear CayenneLPP buffer for next transmission
+    // Réinitialiser le buffer CayenneLPP
     lpp.reset();
 
-    delay(500); // Delay to avoid flooding the serial monitor
+    delay(500); // Pause pour éviter de saturer le moniteur série
 }
