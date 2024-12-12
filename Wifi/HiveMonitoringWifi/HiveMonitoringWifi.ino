@@ -28,6 +28,7 @@ int distance  = 0;
 const char* descriptionDistance = "";
 const char* descriptionSwitch = "";
 const char* descriptionMouvement = "";
+static constexpr uint8_t SEND_BYTES_LENGTH = 51;
 
 // Function to calculate vector norm
 float calculerNorme(float x, float y, float z) {
@@ -153,7 +154,7 @@ void loop() {
     descriptionSwitch = switchState ? "pressé" : "relaché";
 
     // Afficher l'état du switch
-    printSwitchData();
+    //printSwitchData();
 
     // ----- Capteur d'accélération -----
     if (!LIS.isConnection()) {
@@ -227,4 +228,6 @@ void loop() {
     }
 
     //printAllData();
+    CayenneLPP lpp(SEND_BYTES_LENGTH);
+    lpp = dataToSend(lpp);
 }

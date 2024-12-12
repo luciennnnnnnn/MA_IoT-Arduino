@@ -3,6 +3,7 @@
 #include "LIS3DHTR.h"
 #include <Wire.h>
 #include "src/SwitchHandler.h"
+#include "src/ServoControl.h"
 #include "AHT20.h"
 #include <math.h> // Pour sqrt et fabs
 
@@ -10,6 +11,11 @@
 #define SEUIL_OUVERT 500   // Distance en mm pour considérer "ouvert"
 #define SEUIL_NORME 0.3    // Seuil pour la variation de la norme vectorielle
 #define TEMPORISATION_STATIQUE 5 // Nombre de cycles requis pour confirmer un état statique
+
+// Définir les pins
+const int servoPin = 2; // Pin du servomoteur
+// Créer une instance du servomoteur
+ServoControl myServo(servoPin);
 
 float lastNorme = 0.0; // Dernière valeur de la norme vectorielle
 int compteurStatique = 0; // Compteur pour temporisation
@@ -102,6 +108,8 @@ void setup() {
     SERIAL.println("All sensors initialized successfully!");
 }
 
+#define MOTOR_TIMEOUT 5000  // Timeout pour la commande moteur (en millisecondes)
+
 void loop() {
     // Lire l'état du switch
     bool switchState = switchHandler.readSwitch();
@@ -190,6 +198,27 @@ void loop() {
         SERIAL.println(")");
     }
 
+    // Contrôle du moteur en fonction de l'état du switch et de la distance
+    unsigned long startMillis = millis();  // Enregistrer le temps au début de l'action
+
+    if (switchState) {
+        // Si le switch est pressé, fermer la porte
+        myServo.startClosing();
+        while (RangingMeasurementData.RangeMilliMeter > SEUIL_FERME && switchState) {
+            switchState = switchHandler.readSwitch(); // Vérifier si le switch est toujours pressé
+            VL53L0X.PerformContinuousRangingMeasurement(&RangingMeasurementData); // Lire la distance
+        }
+         myServo.stopClosing(); // Arrêter la fermeture
+    } else {
+        // Si le switch est relâché, ouvrir la porte
+        myServo.startOpening();
+        while (RangingMeasurementData.RangeMilliMeter < SEUIL_OUVERT && !switchState) {
+            switchState = switchHandler.readSwitch(); // Vérifier si le switch est toujours relâché
+            VL53L0X.PerformContinuousRangingMeasurement(&RangingMeasurementData); // Lire la distance
+        }
+        myServo.stopOpening; // Arrêter l'ouverture
+    }
+
     // ----- Capteur de température et d'humidité -----
     float humidity = 0, temperature = 0;
     bool ahtSuccess = AHT.getSensor(&humidity, &temperature);
@@ -222,5 +251,5 @@ void loop() {
     // Réinitialiser le buffer CayenneLPP
     lpp.reset();
 
-    delay(3000); // Pause pour éviter de saturer le moniteur série
+    delay(500); // Pause pour éviter de saturer le moniteur série
 }
