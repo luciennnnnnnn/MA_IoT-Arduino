@@ -1,4 +1,4 @@
-#include <CayenneLPP.h>
+ #include <CayenneLPP.h>
 #include "Seeed_vl53l0x.h"
 #include "LIS3DHTR.h"
 //#include <Wire.h>
@@ -18,6 +18,8 @@
 #define SEUIL_NORME 0.3    // Seuil pour la variation de la norme vectorielle
 #define TEMPORISATION_STATIQUE 5 // Nombre de cycles requis pour confirmer un état statique
 
+float humidity, temperature;
+int etatDistance = 0; // Par défaut
 float lastNorme = 0.0; // Dernière valeur de la norme vectorielle
 int compteurStatique = 0; // Compteur pour temporisation
 int dernierEtatMouvement = 1; // Dernier état connu (1 = statique, 2 = en mouvement)
@@ -53,9 +55,28 @@ SwitchHandler switchHandler(SWITCH_PIN);
 // AHT20 temperature and humidity sensor object
 AHT20 AHT;
 
-// CayenneLPP object for formatting data
-CayenneLPP lpp(51);
 
+// Données à evnoyer
+CayenneLPP dataToSend(CayenneLPP lpp) {
+    lpp.reset();
+    // ----- Ajout des données au payload CayenneLPP -----
+    lpp.addDigitalInput(1, dernierEtatMouvement); // État de mouvement
+    lpp.addDigitalInput(2, etatDistance);         // État de la distance
+    lpp.addTemperature(3, temperature);
+    lpp.addRelativeHumidity(4, humidity * 100); // Multiplier par 100 pour un format correct
+
+    // Transmettre le payload via le moniteur série
+    SERIAL.print("Payload CayenneLPP : ");
+    for (size_t i = 0; i < lpp.getSize(); i++) {
+        SERIAL.print(lpp.getBuffer()[i], HEX);
+        SERIAL.print(" ");
+    }
+    SERIAL.println();
+
+    return lpp;
+}
+
+//LORA
 ////////////////////////////////////////////////////////////////////////////////
 // Types
 
@@ -133,10 +154,7 @@ void MyLbmxEventHandlers::alarm(const LbmxEvent& event)
     printf("Send the uplink message.\n");
 
     CayenneLPP lpp(SEND_BYTES_LENGTH);
-    lpp.reset();
-    lpp.addTemperature(1, random(20,30));
-    lpp.addRelativeHumidity(2, random(40, 80));
-    lpp.addPresence(3, random(0, 1));
+    lpp = dataToSend(lpp);
 
     if (LbmxEngine::requestUplink(UPLINK_FPORT, false, lpp.getBuffer(), lpp.getSize()) != SMTC_MODEM_RC_OK) abort();
 
@@ -158,8 +176,12 @@ static void ModemEventHandler()
         handlers.invoke(event);
     }
 }
-void setup() {
 
+////////////////////////////////////////////////////////////////////////////////
+// setup and loop
+
+void setup()
+{
     delay(1000);
     printf("\n---------- STARTUP ----------\n");
     
@@ -209,7 +231,7 @@ void setup() {
     delay(100);  // Allow the sensor to stabilize after initialization
 
     // Perform a quick test to ensure the sensor is operational
-    float humidity, temperature;
+ 
     int status = AHT.getSensor(&humidity, &temperature);
     if (status == 0) { // 0 indicates failure
         SERIAL.println("Failed to initialize AHT20!");
@@ -278,7 +300,7 @@ void loop() {
     VL53L0X_RangingMeasurementData_t RangingMeasurementData;
     VL53L0X.PerformContinuousRangingMeasurement(&RangingMeasurementData);
 
-    int etatDistance = 0; // Par défaut
+    etatDistance = 0; // Par défaut
     const char* descriptionDistance = "";
     if (RangingMeasurementData.RangeMilliMeter >= 2000) {
         SERIAL.println("Distance: Hors de portée");
@@ -320,24 +342,8 @@ void loop() {
         SERIAL.println("Erreur de lecture du capteur AHT20 !");
     }
 
-    // ----- Ajout des données au payload CayenneLPP -----
-    lpp.addDigitalInput(6, dernierEtatMouvement); // État de mouvement
-    lpp.addDigitalInput(7, etatDistance);         // État de la distance
-    if (ahtSuccess) {
-        lpp.addTemperature(8, temperature);
-        lpp.addRelativeHumidity(9, humidity * 100); // Multiplier par 100 pour un format correct
-    }
-
-    // Transmettre le payload via le moniteur série
-    SERIAL.print("Payload CayenneLPP : ");
-    for (size_t i = 0; i < lpp.getSize(); i++) {
-        SERIAL.print(lpp.getBuffer()[i], HEX);
-        SERIAL.print(" ");
-    }
-    SERIAL.println();
-
     // Réinitialiser le buffer CayenneLPP
-    lpp.reset();
+    //lpp.reset();
 
      switch (state)
     {
@@ -359,5 +365,5 @@ void loop() {
 
     delay(min(sleepTime, EXECUTION_PERIOD));
 
-    delay(30000);
+
 }
