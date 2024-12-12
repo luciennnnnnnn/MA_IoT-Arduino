@@ -24,6 +24,13 @@ int etatDistance = 0;
 float lastNorme = 0.0;
 int compteurStatique = 0;
 int dernierEtatMouvement = 1;
+float ax = 0;
+float ay = 0;
+float az = 0;
+int distance  = 0;
+const char* descriptionDistance = "";
+const char* descriptionSwitch = "";
+const char* descriptionMouvement = "";
 
 // Function to calculate vector norm
 float calculerNorme(float x, float y, float z) {
@@ -43,7 +50,7 @@ LIS3DHTR<TwoWire> LIS;
 #define WIRE Wire
 
 // Define pin for the switch and switch handler object
-#define SWITCH_PIN 1
+#define SWITCH_PIN 14
 SwitchHandler switchHandler(SWITCH_PIN);
 
 // AHT20 temperature and humidity sensor object
@@ -52,6 +59,9 @@ AHT20 AHT;
 // Function to prepare CayenneLPP payload
 CayenneLPP dataToSend(CayenneLPP lpp) {
     lpp.reset();
+
+    printAllData();
+
     lpp.addDigitalInput(1, dernierEtatMouvement);
     lpp.addDigitalInput(2, etatDistance);
     lpp.addTemperature(3, temperature);
@@ -75,7 +85,8 @@ static const uint8_t JOIN_EUI[8] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0
 static const uint8_t APP_KEY[16] = { 0x54, 0x98, 0x8D, 0x11, 0xBD, 0xC0, 0xDD, 0xD1, 0xAB, 0x2F, 0x69, 0x91, 0x71, 0xFD, 0x40, 0x2A };
 
 static constexpr uint32_t FIRST_UPLINK_DELAY = 10;  // [sec.]
-static constexpr uint32_t UPLINK_PERIOD = 30;      // [sec.]
+//static constexpr uint32_t UPLINK_PERIOD = 30;      // [sec.] (debug)
+static constexpr uint32_t UPLINK_PERIOD = 600;      // [sec.] avoid network saturation
 static constexpr uint8_t UPLINK_FPORT = 3;
 static constexpr uint32_t EXECUTION_PERIOD = 50;   // [msec.]
 static constexpr uint8_t SEND_BYTES_LENGTH = 51;
@@ -129,6 +140,54 @@ static void ModemEventHandler() {
     }
 }
 
+void printAccelerometerData(float ax, float ay, float az, int dernierEtatMouvement,  const char* descriptionMouvement)
+{
+     SERIAL.print("Accéléromètre : X");
+    SERIAL.print(ax, 2); // Limiter à 2 décimales
+    SERIAL.print(" Y");
+    SERIAL.print(ay, 2);
+    SERIAL.print(" Z");
+    SERIAL.print(az, 2);
+    SERIAL.print(", État de la ruche : ");
+    SERIAL.print(dernierEtatMouvement);
+    SERIAL.print(" (");
+    SERIAL.print(descriptionMouvement);
+    SERIAL.println(")");
+}
+
+void printDistanceData(float distance, const char* descriptionDistance)
+{
+    SERIAL.print("Distance du capteur : ");
+    SERIAL.print(distance);
+    SERIAL.print(" mm, État de la porte : ");
+    SERIAL.print(etatDistance);
+    SERIAL.print(" (");
+    SERIAL.print(descriptionDistance);
+    SERIAL.println(")");
+}
+
+void printTempHumidityData()
+{
+    SERIAL.print("Température : ");
+    SERIAL.print(temperature);
+    SERIAL.print(" °C, Humidité : ");
+    SERIAL.print(humidity * 100); // Multiplier par 100 pour obtenir le pourcentage
+    SERIAL.println(" %");
+}
+
+void printSwitchData()
+{
+    SERIAL.print("État du switch : ");
+    SERIAL.println(descriptionSwitch);
+}
+
+void printAllData()
+{
+    printAccelerometerData(ax, ay, az, dernierEtatMouvement, descriptionMouvement);
+    printDistanceData(distance, descriptionDistance);
+    printTempHumidityData();
+}
+
 void setup() {
     delay(1000);
     printf("\n---------- STARTUP ----------\n");
@@ -164,11 +223,10 @@ void setup() {
 void loop() {
     // Lire l'état du switch
     bool switchState = switchHandler.readSwitch();
-    const char* descriptionSwitch = switchState ? "pressé" : "relaché";
+    descriptionSwitch = switchState ? "pressé" : "relaché";
 
     // Afficher l'état du switch
-    SERIAL.print("État du switch : ");
-    SERIAL.println(descriptionSwitch);
+    //printSwitchData();
 
     // ----- Capteur d'accélération -----
     if (!LIS.isConnection()) {
@@ -177,9 +235,9 @@ void loop() {
     }
 
     // Lire les valeurs de l'accéléromètre
-    float ax = LIS.getAccelerationX();
-    float ay = LIS.getAccelerationY();
-    float az = LIS.getAccelerationZ();
+    ax = LIS.getAccelerationX();
+    ay = LIS.getAccelerationY();
+    az = LIS.getAccelerationZ();
 
     // Calculer la norme vectorielle et lisser les variations
     float normeActuelle = calculerNorme(ax, ay, az);
@@ -201,33 +259,23 @@ void loop() {
         dernierEtatMouvement = 2;
     }
 
-    const char* descriptionMouvement = (dernierEtatMouvement == 2) ? "en mouvement" : "statique";
+    descriptionMouvement = (dernierEtatMouvement == 2) ? "en mouvement" : "statique";
 
     // Affichage formaté pour l'accéléromètre
-    SERIAL.print("Accéléromètre : X");
-    SERIAL.print(ax, 2); // Limiter à 2 décimales
-    SERIAL.print(" Y");
-    SERIAL.print(ay, 2);
-    SERIAL.print(" Z");
-    SERIAL.print(az, 2);
-    SERIAL.print(", État de la ruche : ");
-    SERIAL.print(dernierEtatMouvement);
-    SERIAL.print(" (");
-    SERIAL.print(descriptionMouvement);
-    SERIAL.println(")");
+    //printAccelerometerData(ax, ay, az, dernierEtatMouvement, descriptionMouvement);
 
     // ----- Capteur de distance -----
     VL53L0X_RangingMeasurementData_t RangingMeasurementData;
     VL53L0X.PerformContinuousRangingMeasurement(&RangingMeasurementData);
 
     etatDistance = 0; // Par défaut
-    const char* descriptionDistance = "";
+    descriptionDistance = "";
     if (RangingMeasurementData.RangeMilliMeter >= 2000) {
         SERIAL.println("Distance: Hors de portée");
         etatDistance = 3; // Considérer comme "ouvert" si hors de portée
         descriptionDistance = "ouvert";
     } else {
-        int distance = RangingMeasurementData.RangeMilliMeter;
+        distance = RangingMeasurementData.RangeMilliMeter;
         if (distance <= SEUIL_FERME) {
             etatDistance = 1; // Fermé
             descriptionDistance = "fermé";
@@ -240,29 +288,16 @@ void loop() {
         }
 
         // Affichage formaté pour la distance et l'état de la porte
-        SERIAL.print("Distance du capteur : ");
-        SERIAL.print(distance);
-        SERIAL.print(" mm, État de la porte : ");
-        SERIAL.print(etatDistance);
-        SERIAL.print(" (");
-        SERIAL.print(descriptionDistance);
-        SERIAL.println(")");
+        //printDistanceData(distance, descriptionDistance);
     }
 
     // ----- Capteur de température et d'humidité -----
     bool ahtSuccess = AHT.getSensor(&humidity, &temperature);
     if (ahtSuccess) {
-        SERIAL.print("Température : ");
-        SERIAL.print(temperature);
-        SERIAL.print(" °C, Humidité : ");
-        SERIAL.print(humidity * 100); // Multiplier par 100 pour obtenir le pourcentage
-        SERIAL.println(" %");
+        //printTempHumidityData();
     } else {
         SERIAL.println("Erreur de lecture du capteur AHT20 !");
     }
-
-    // Réinitialiser le buffer CayenneLPP
-    //lpp.reset();
 
      switch (state)
     {
@@ -284,5 +319,5 @@ void loop() {
 
     delay(min(sleepTime, EXECUTION_PERIOD));
 
-
+    //printAllData();
 }
