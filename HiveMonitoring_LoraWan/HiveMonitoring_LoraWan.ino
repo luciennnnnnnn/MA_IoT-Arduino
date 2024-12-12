@@ -5,6 +5,10 @@
 #include "src/SwitchHandler.h"
 #include "AHT20.h"
 #include <math.h> // Pour sqrt et fabs
+#include <Arduino.h>
+
+#include <LbmWm1110.hpp>
+#include <Lbmx.hpp>
 
 #undef SERIAL // Facultatif : supprimer la définition précédente
 #define MY_SERIAL Serial
@@ -52,7 +56,117 @@ AHT20 AHT;
 // CayenneLPP object for formatting data
 CayenneLPP lpp(51);
 
+////////////////////////////////////////////////////////////////////////////////
+// Types
+
+enum class StateType
+{
+    Startup,
+    Joining,
+    Joined,
+    Failed,
+};
+
+////////////////////////////////////////////////////////////////////////////////
+// Constants
+
+static constexpr smtc_modem_region_t REGION = SMTC_MODEM_REGION_EU_868;
+static const uint8_t DEV_EUI[8]  = { 0x2C, 0xF7, 0xF1, 0xF0, 0x61, 0x90, 0x00, 0x67 };
+static const uint8_t JOIN_EUI[8] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+static const uint8_t APP_KEY[16] = { 0x54, 0x98, 0x8D, 0x11, 0xBD, 0xC0, 0xDD, 0xD1, 0xAB, 0x2F, 0x69, 0x91, 0x71, 0xFD, 0x40, 0x2A };
+
+static constexpr uint32_t FIRST_UPLINK_DELAY = 10;  // [sec.]
+static constexpr uint32_t UPLINK_PERIOD = 30;       // [sec.]
+static constexpr uint8_t UPLINK_FPORT = 3;
+
+static constexpr uint32_t EXECUTION_PERIOD = 50;    // [msec.]
+
+static constexpr uint8_t SEND_BYTES_LENGTH = 51;
+////////////////////////////////////////////////////////////////////////////////
+// Variables
+
+static LbmWm1110& lbmWm1110 = LbmWm1110::getInstance();
+static StateType state = StateType::Startup;
+////////////////////////////////////////////////////////////////////////////////
+// MyLbmxEventHandlers
+
+class MyLbmxEventHandlers : public LbmxEventHandlers
+{
+protected:
+    void reset(const LbmxEvent& event) override;
+    void joined(const LbmxEvent& event) override;
+    void joinFail(const LbmxEvent& event) override;
+    void alarm(const LbmxEvent& event) override;
+
+};
+
+void MyLbmxEventHandlers::reset(const LbmxEvent& event)
+{
+    if (LbmxEngine::setRegion(REGION) != SMTC_MODEM_RC_OK) abort();
+    if (LbmxEngine::setOTAA(DEV_EUI, JOIN_EUI, APP_KEY) != SMTC_MODEM_RC_OK) abort();
+
+    printf("Join the LoRaWAN network.\n");
+    if (LbmxEngine::joinNetwork() != SMTC_MODEM_RC_OK) abort();
+
+    // if((REGION == SMTC_MODEM_REGION_EU_868) || (REGION == SMTC_MODEM_REGION_RU_864))
+    // {
+    //     smtc_modem_set_region_duty_cycle( false );
+    // }
+
+    state = StateType::Joining;
+}
+
+void MyLbmxEventHandlers::joined(const LbmxEvent& event)
+{
+    state = StateType::Joined;
+    printf("Start the alarm event.\n");
+    if (LbmxEngine::startAlarm(FIRST_UPLINK_DELAY) != SMTC_MODEM_RC_OK) abort();
+}
+
+void MyLbmxEventHandlers::joinFail(const LbmxEvent& event)
+{
+    state = StateType::Failed;
+}
+
+void MyLbmxEventHandlers::alarm(const LbmxEvent& event)
+{
+    printf("Send the uplink message.\n");
+
+    CayenneLPP lpp(SEND_BYTES_LENGTH);
+    lpp.reset();
+    lpp.addTemperature(1, random(20,30));
+    lpp.addRelativeHumidity(2, random(40, 80));
+    lpp.addPresence(3, random(0, 1));
+
+    if (LbmxEngine::requestUplink(UPLINK_FPORT, false, lpp.getBuffer(), lpp.getSize()) != SMTC_MODEM_RC_OK) abort();
+
+    if (LbmxEngine::startAlarm(UPLINK_PERIOD) != SMTC_MODEM_RC_OK) abort();
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// ModemEventHandler
+
+static void ModemEventHandler()
+{
+    static LbmxEvent event;
+    static MyLbmxEventHandlers handlers;
+
+    while (event.fetch())
+    {
+        printf("----- %s -----\n", event.getEventString().c_str());
+
+        handlers.invoke(event);
+    }
+}
 void setup() {
+
+    delay(1000);
+    printf("\n---------- STARTUP ----------\n");
+    
+    lbmWm1110.begin();
+    LbmxEngine::begin(lbmWm1110.getRadio(), ModemEventHandler);
+    LbmxEngine::printVersions(lbmWm1110.getRadio());
+
     // Initialize serial communication for debugging
     SERIAL.begin(115200);
     while (!SERIAL) {
@@ -225,5 +339,25 @@ void loop() {
     // Réinitialiser le buffer CayenneLPP
     lpp.reset();
 
-    delay(3000); // Pause pour éviter de saturer le moniteur série
+     switch (state)
+    {
+    case StateType::Startup:
+        ledOff(LED_BUILTIN);
+        break;
+    case StateType::Joining:
+        if (millis() % 1000 < 200) ledOn(LED_BUILTIN); else ledOff(LED_BUILTIN);
+        break;
+    case StateType::Joined:
+        ledOn(LED_BUILTIN);
+        break;
+    case StateType::Failed:
+        if (millis() % 400 < 200) ledOn(LED_BUILTIN); else ledOff(LED_BUILTIN);
+        break;
+    }
+
+    const uint32_t sleepTime = LbmxEngine::doWork();
+
+    delay(min(sleepTime, EXECUTION_PERIOD));
+
+    delay(30000);
 }
