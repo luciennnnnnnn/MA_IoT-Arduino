@@ -6,25 +6,20 @@
 const int servoPin = 2; // Pin du servomoteur
 const int distanceSeuil = 100; // Distance seuil en mm
 
-// Définir les constantes
-#define DISTANCE_SEUIL 50 // Distance seuil en mm
-#define TIMEOUT 5000      // Timeout en ms
-
 // Créer une instance du servomoteur
 ServoControl myServo(servoPin);
 
 // Initialiser le capteur de distance
 Seeed_vl53l0x distanceSensor;
 
-// Variables pour la gestion du timeout
-unsigned long startTime = 0;
+// Variable pour suivre l'état du servo
 bool isServoActive = false;
 
 void setup() {
     Serial.begin(115200);
 
     // Initialiser le servomoteur
-    myServo.fermer(); // Assurez-vous que le moteur commence fermé
+    myServo.ouvrir(); // Assurez-vous que le moteur commence ouvert
     Serial.println("Servo initialisé.");
 
     // Initialiser le capteur de distance
@@ -50,21 +45,18 @@ void loop() {
     Serial.print(distance);
     Serial.println(" mm");
 
-    // Démarrer le servo si une condition est remplie (par exemple, distance > seuil haut)
-    if (!isServoActive && distance > distanceSeuil) {
+    // Démarrer le servo si la distance dépasse le seuil
+    if (!isServoActive && distance > distanceSeuil + 20) {
         myServo.ouvrir();
         isServoActive = true;
-        startTime = millis(); // Démarrer le timer
         Serial.println("Servo activé (ouverture).");
     }
 
-    // Arrêter le servo si la distance atteint le seuil bas ou timeout
-    if (isServoActive) {
-        if (distance <= distanceSeuil || millis() - startTime > TIMEOUT) {
-            myServo.fermer();
-            isServoActive = false;
-            Serial.println("Servo désactivé (fermeture).");
-        }
+    // Fermer le servo si la distance est inférieure ou égale au seuil
+    if (isServoActive && distance <= distanceSeuil) {
+        myServo.fermer();
+        isServoActive = false;
+        Serial.println("Servo désactivé (fermeture).");
     }
 
     delay(100); // Petit délai pour éviter les lectures trop rapides
