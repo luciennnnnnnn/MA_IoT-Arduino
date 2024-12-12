@@ -1,35 +1,36 @@
- #include <CayenneLPP.h>
+#include <CayenneLPP.h>
 #include "Seeed_vl53l0x.h"
 #include "LIS3DHTR.h"
-//#include <Wire.h>
 #include "src/SwitchHandler.h"
 #include "AHT20.h"
-#include <math.h> // Pour sqrt et fabs
+#include <math.h> // For sqrt and fabs
 #include <Arduino.h>
-
 #include <LbmWm1110.hpp>
 #include <Lbmx.hpp>
 
-#undef SERIAL // Facultatif : supprimer la définition précédente
-#define MY_SERIAL Serial
+// Define serial port
+#undef SERIAL
+#define SERIAL Serial
 
-#define SEUIL_FERME 100    // Distance en mm pour considérer "fermé"
-#define SEUIL_OUVERT 500   // Distance en mm pour considérer "ouvert"
-#define SEUIL_NORME 0.3    // Seuil pour la variation de la norme vectorielle
-#define TEMPORISATION_STATIQUE 5 // Nombre de cycles requis pour confirmer un état statique
+// Define constants for thresholds
+#define SEUIL_FERME 100         // Distance in mm to consider "closed"
+#define SEUIL_OUVERT 500        // Distance in mm to consider "open"
+#define SEUIL_NORME 0.3         // Threshold for vector norm variation
+#define TEMPORISATION_STATIQUE 5 // Cycles needed to confirm static state
 
-float humidity, temperature;
-int etatDistance = 0; // Par défaut
-float lastNorme = 0.0; // Dernière valeur de la norme vectorielle
-int compteurStatique = 0; // Compteur pour temporisation
-int dernierEtatMouvement = 1; // Dernier état connu (1 = statique, 2 = en mouvement)
+// Global variables
+float humidity = 0, temperature = 0;
+int etatDistance = 0;
+float lastNorme = 0.0;
+int compteurStatique = 0;
+int dernierEtatMouvement = 1;
 
-// Fonction pour calculer la norme vectorielle
+// Function to calculate vector norm
 float calculerNorme(float x, float y, float z) {
     return sqrt(x * x + y * y + z * z);
 }
 
-// Fonction pour calculer une moyenne glissante
+// Function to calculate a moving average
 float calculerMoyenne(float ancienneValeur, float nouvelleValeur, float facteur) {
     return (ancienneValeur * (1.0 - facteur)) + (nouvelleValeur * facteur);
 }
@@ -37,14 +38,7 @@ float calculerMoyenne(float ancienneValeur, float nouvelleValeur, float facteur)
 // VL53L0X Time-of-Flight sensor object
 Seeed_vl53l0x VL53L0X;
 
-// Define the serial port depending on the board
-#ifdef ARDUINO_SAMD_VARIANT_COMPLIANCE
-    #define SERIAL SerialUSB
-#else
-    #define SERIAL Serial
-#endif
-
-// Define LIS3DHTR accelerometer object
+// LIS3DHTR accelerometer object
 LIS3DHTR<TwoWire> LIS;
 #define WIRE Wire
 
@@ -55,18 +49,15 @@ SwitchHandler switchHandler(SWITCH_PIN);
 // AHT20 temperature and humidity sensor object
 AHT20 AHT;
 
-
-// Données à evnoyer
+// Function to prepare CayenneLPP payload
 CayenneLPP dataToSend(CayenneLPP lpp) {
     lpp.reset();
-    // ----- Ajout des données au payload CayenneLPP -----
-    lpp.addDigitalInput(1, dernierEtatMouvement); // État de mouvement
-    lpp.addDigitalInput(2, etatDistance);         // État de la distance
+    lpp.addDigitalInput(1, dernierEtatMouvement);
+    lpp.addDigitalInput(2, etatDistance);
     lpp.addTemperature(3, temperature);
-    lpp.addRelativeHumidity(4, humidity * 100); // Multiplier par 100 pour un format correct
+    lpp.addRelativeHumidity(4, humidity * 100);
 
-    // Transmettre le payload via le moniteur série
-    SERIAL.print("Payload CayenneLPP : ");
+    SERIAL.print("CayenneLPP Payload: ");
     for (size_t i = 0; i < lpp.getSize(); i++) {
         SERIAL.print(lpp.getBuffer()[i], HEX);
         SERIAL.print(" ");
@@ -76,169 +67,98 @@ CayenneLPP dataToSend(CayenneLPP lpp) {
     return lpp;
 }
 
-//LORA
-////////////////////////////////////////////////////////////////////////////////
-// Types
-
-enum class StateType
-{
-    Startup,
-    Joining,
-    Joined,
-    Failed,
-};
-
-////////////////////////////////////////////////////////////////////////////////
-// Constants
-
+// LoRaWAN constants and variables
+enum class StateType { Startup, Joining, Joined, Failed };
 static constexpr smtc_modem_region_t REGION = SMTC_MODEM_REGION_EU_868;
 static const uint8_t DEV_EUI[8]  = { 0x2C, 0xF7, 0xF1, 0xF0, 0x61, 0x90, 0x00, 0x67 };
 static const uint8_t JOIN_EUI[8] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
 static const uint8_t APP_KEY[16] = { 0x54, 0x98, 0x8D, 0x11, 0xBD, 0xC0, 0xDD, 0xD1, 0xAB, 0x2F, 0x69, 0x91, 0x71, 0xFD, 0x40, 0x2A };
 
 static constexpr uint32_t FIRST_UPLINK_DELAY = 10;  // [sec.]
-static constexpr uint32_t UPLINK_PERIOD = 30;       // [sec.]
+static constexpr uint32_t UPLINK_PERIOD = 30;      // [sec.]
 static constexpr uint8_t UPLINK_FPORT = 3;
-
-static constexpr uint32_t EXECUTION_PERIOD = 50;    // [msec.]
-
+static constexpr uint32_t EXECUTION_PERIOD = 50;   // [msec.]
 static constexpr uint8_t SEND_BYTES_LENGTH = 51;
-////////////////////////////////////////////////////////////////////////////////
-// Variables
 
 static LbmWm1110& lbmWm1110 = LbmWm1110::getInstance();
 static StateType state = StateType::Startup;
-////////////////////////////////////////////////////////////////////////////////
-// MyLbmxEventHandlers
 
-class MyLbmxEventHandlers : public LbmxEventHandlers
-{
+class MyLbmxEventHandlers : public LbmxEventHandlers {
 protected:
     void reset(const LbmxEvent& event) override;
     void joined(const LbmxEvent& event) override;
     void joinFail(const LbmxEvent& event) override;
     void alarm(const LbmxEvent& event) override;
-
 };
 
-void MyLbmxEventHandlers::reset(const LbmxEvent& event)
-{
+void MyLbmxEventHandlers::reset(const LbmxEvent& event) {
     if (LbmxEngine::setRegion(REGION) != SMTC_MODEM_RC_OK) abort();
     if (LbmxEngine::setOTAA(DEV_EUI, JOIN_EUI, APP_KEY) != SMTC_MODEM_RC_OK) abort();
 
-    printf("Join the LoRaWAN network.\n");
+    printf("Joining the LoRaWAN network...\n");
     if (LbmxEngine::joinNetwork() != SMTC_MODEM_RC_OK) abort();
-
-    // if((REGION == SMTC_MODEM_REGION_EU_868) || (REGION == SMTC_MODEM_REGION_RU_864))
-    // {
-    //     smtc_modem_set_region_duty_cycle( false );
-    // }
-
     state = StateType::Joining;
 }
 
-void MyLbmxEventHandlers::joined(const LbmxEvent& event)
-{
+void MyLbmxEventHandlers::joined(const LbmxEvent& event) {
     state = StateType::Joined;
-    printf("Start the alarm event.\n");
+    printf("Network joined successfully. Starting alarm event.\n");
     if (LbmxEngine::startAlarm(FIRST_UPLINK_DELAY) != SMTC_MODEM_RC_OK) abort();
 }
 
-void MyLbmxEventHandlers::joinFail(const LbmxEvent& event)
-{
+void MyLbmxEventHandlers::joinFail(const LbmxEvent& event) {
     state = StateType::Failed;
 }
 
-void MyLbmxEventHandlers::alarm(const LbmxEvent& event)
-{
-    printf("Send the uplink message.\n");
-
+void MyLbmxEventHandlers::alarm(const LbmxEvent& event) {
+    printf("Sending uplink message.\n");
     CayenneLPP lpp(SEND_BYTES_LENGTH);
     lpp = dataToSend(lpp);
 
     if (LbmxEngine::requestUplink(UPLINK_FPORT, false, lpp.getBuffer(), lpp.getSize()) != SMTC_MODEM_RC_OK) abort();
-
     if (LbmxEngine::startAlarm(UPLINK_PERIOD) != SMTC_MODEM_RC_OK) abort();
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// ModemEventHandler
-
-static void ModemEventHandler()
-{
+static void ModemEventHandler() {
     static LbmxEvent event;
     static MyLbmxEventHandlers handlers;
 
-    while (event.fetch())
-    {
+    while (event.fetch()) {
         printf("----- %s -----\n", event.getEventString().c_str());
-
         handlers.invoke(event);
     }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// setup and loop
-
-void setup()
-{
+void setup() {
     delay(1000);
     printf("\n---------- STARTUP ----------\n");
-    
+
     lbmWm1110.begin();
     LbmxEngine::begin(lbmWm1110.getRadio(), ModemEventHandler);
     LbmxEngine::printVersions(lbmWm1110.getRadio());
 
     // Initialize serial communication for debugging
     SERIAL.begin(115200);
-    while (!SERIAL) {
-        ; // Wait for the serial connection to establish
-    }
+    while (!SERIAL);
 
-    // Initialize VL53L0X
-    VL53L0X_Error Status = VL53L0X.VL53L0X_common_init();
-    if (Status != VL53L0X_ERROR_NONE) {
+    // Initialize sensors
+    if (VL53L0X.VL53L0X_common_init() != VL53L0X_ERROR_NONE) {
         SERIAL.println("Failed to initialize VL53L0X!");
-        VL53L0X.print_pal_error(Status);
         while (1);
     }
 
     VL53L0X.VL53L0X_continuous_ranging_init();
-    if (Status != VL53L0X_ERROR_NONE) {
-        SERIAL.println("Failed to start continuous ranging for VL53L0X!");
-        VL53L0X.print_pal_error(Status);
-        while (1);
-    }
 
-    // Initialize I2C bus
     WIRE.begin();
-
-    // Initialize LIS3DHTR accelerometer
-    LIS.begin(WIRE, LIS3DHTR_ADDRESS_UPDATED); // The method returns void
-    if (!LIS.isConnection()) { // Use a method that verifies the connection
+    LIS.begin(WIRE, LIS3DHTR_ADDRESS_UPDATED);
+    if (!LIS.isConnection()) {
         SERIAL.println("Failed to initialize LIS3DHTR!");
         while (1);
     }
     LIS.setOutputDataRate(LIS3DHTR_DATARATE_50HZ);
 
-    // Initialize the switch handler
     switchHandler.begin();
-
-    // Initialize AHT20
-    SERIAL.println("Initializing AHT20 sensor...");
-    AHT.begin(); // Simple initialization, no return value
-
-    delay(100);  // Allow the sensor to stabilize after initialization
-
-    // Perform a quick test to ensure the sensor is operational
- 
-    int status = AHT.getSensor(&humidity, &temperature);
-    if (status == 0) { // 0 indicates failure
-        SERIAL.println("Failed to initialize AHT20!");
-        while (1); // Stop execution if the sensor initialization fails
-    }
-
-    SERIAL.println("All sensors initialized successfully!");
+    AHT.begin();
 }
 
 void loop() {
@@ -330,7 +250,6 @@ void loop() {
     }
 
     // ----- Capteur de température et d'humidité -----
-    float humidity = 0, temperature = 0;
     bool ahtSuccess = AHT.getSensor(&humidity, &temperature);
     if (ahtSuccess) {
         SERIAL.print("Température : ");
