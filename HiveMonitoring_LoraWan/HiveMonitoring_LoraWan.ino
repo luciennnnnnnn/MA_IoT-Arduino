@@ -1,10 +1,13 @@
 #include <CayenneLPP.h>
 #include "Seeed_vl53l0x.h"
 #include "LIS3DHTR.h"
-#include <Wire.h>
+//#include <Wire.h>
 #include "src/SwitchHandler.h"
 #include "AHT20.h"
 #include <math.h> // Pour sqrt et fabs
+
+#undef SERIAL // Facultatif : supprimer la définition précédente
+#define MY_SERIAL Serial
 
 #define SEUIL_FERME 100    // Distance en mm pour considérer "fermé"
 #define SEUIL_OUVERT 500   // Distance en mm pour considérer "ouvert"
