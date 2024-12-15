@@ -16,6 +16,8 @@
 #define TEMPORISATION_STATIQUE 5 // Cycles needed to confirm static state
 
 // Global variables
+const int timestamp = 1;   //ms
+unsigned long lastTimestamp = 0; // Stocke le dernier horodatage
 float humidity = 0, temperature = 0;
 int etatDistance = 0;
 float lastNorme = 0.0;
@@ -54,8 +56,42 @@ SwitchHandler switchHandler(SWITCH_PIN);
 // AHT20 temperature and humidity sensor object
 AHT20 AHT;
 
+// Template function declaration
+template <typename T>
+T callEveryXMs(int ms, T (*callback)());
+
+// Function to execute a callback every X milliseconds
+template <typename T>
+T callEveryXMs(int ms, T (*callback)()) {
+    static unsigned long lastTimestamp = 0;
+
+    if (ms <= 0) {
+        SERIAL.println("ERROR in callEveryXMs: ms <= 0");
+        return callback(); // Fallback for invalid timing
+    }
+
+    unsigned long currentTimestamp = millis();
+
+    if (currentTimestamp - lastTimestamp >= ms) {
+        lastTimestamp = currentTimestamp;
+        SERIAL.printf("CALL OK %lu ms\n", currentTimestamp);
+
+        T result = callback(); // Call the function and get its return
+        SERIAL.println("Callback executed successfully.");
+        return result;
+    }
+
+    if constexpr (std::is_same<T, CayenneLPP>::value) {
+        return T(SEND_BYTES_LENGTH); // Correct construction for CayenneLPP
+    } else {
+        return T(); // Generic default construction for other types
+    }
+}
+
 // Function to prepare CayenneLPP payload
-CayenneLPP dataToSend(CayenneLPP lpp) {
+// Function to prepare CayenneLPP payload
+CayenneLPP dataToSend() {
+    CayenneLPP lpp(SEND_BYTES_LENGTH); // Ensure the buffer size is passed
     lpp.reset();
 
     printAllData();
@@ -67,12 +103,11 @@ CayenneLPP dataToSend(CayenneLPP lpp) {
 
     SERIAL.print("CayenneLPP Payload: ");
     for (size_t i = 0; i < lpp.getSize(); i++) {
-        SERIAL.print(lpp.getBuffer()[i], HEX);
-        SERIAL.print(" ");
+        SERIAL.printf("%02X ", lpp.getBuffer()[i]); // Use printf for formatted output
     }
     SERIAL.println();
 
-    return lpp;
+    return lpp; // Return the constructed payload
 }
 
 void printAccelerometerData(float ax, float ay, float az, int dernierEtatMouvement,  const char* descriptionMouvement)
@@ -228,6 +263,8 @@ void loop() {
     }
 
     //printAllData();
-    CayenneLPP lpp(SEND_BYTES_LENGTH);
-    lpp = dataToSend(lpp);
+    //lpp = dataToSend(lpp);
+    CayenneLPP lpp = callEveryXMs(10000, dataToSend);
+
+    delay(10);  // Give the processor a break
 }
