@@ -207,9 +207,44 @@ void printTempHumidityData() {
 }
 
 void printAllData() {
-    printAccelerometerData(ax, ay, az, dernierEtatMouvement, descriptionMouvement);
-    printDistanceData(distance, descriptionDistance);
-    printTempHumidityData();
+    //printAccelerometerData(ax, ay, az, dernierEtatMouvement, descriptionMouvement);
+    //printDistanceData(distance, descriptionDistance);
+    //printTempHumidityData();
+    SERIAL.print("Distance: ");
+    SERIAL.print(distance);
+    SERIAL.print(" mm | ");
+
+    SERIAL.print("Position demandée: ");
+    SERIAL.print(positionDemandee);
+    SERIAL.print(" | ");
+
+    SERIAL.print("État actuel: ");
+    SERIAL.print(descriptionDistance);
+    SERIAL.print(" | ");
+
+    SERIAL.print("Angle moteur: ");
+    SERIAL.print(angleActuel);
+    SERIAL.print(" | ");
+
+    SERIAL.print("Température: ");
+    SERIAL.print(temperature);
+    SERIAL.print(" °C | ");
+
+    SERIAL.print("Humidité: ");
+    SERIAL.print(humidity * 100);
+    SERIAL.print(" % | ");
+
+    SERIAL.print("Accéléromètre: X");
+    SERIAL.print(ax, 2);
+    SERIAL.print(" Y");
+    SERIAL.print(ay, 2);
+    SERIAL.print(" Z");
+    SERIAL.print(az, 2);
+    SERIAL.print(" | ");
+
+    SERIAL.print("Mouvement: ");
+    SERIAL.print(descriptionMouvement);
+    SERIAL.println();
 }
 
 static void ModemEventHandler() {
@@ -260,22 +295,6 @@ void mesurerTemperatureHumidite() {
 
 int getAngle() {
     return angleActuel;
-}
-
-void afficherDonnees() {
-    Serial.print("Distance: ");
-    Serial.print(distance);
-    Serial.print(" mm | Position demandée: ");
-    Serial.print(positionDemandee);
-    Serial.print(" | État actuel: ");
-    Serial.print(descriptionDistance);
-    Serial.print(" | Angle moteur: ");
-    Serial.print(getAngle());
-    Serial.print(" | Température: ");
-    Serial.print(temperature);
-    Serial.print(" °C | Humidité: ");
-    Serial.print(humidity * 100);
-    Serial.println(" %");
 }
 
 
@@ -403,6 +422,5 @@ void loop() {
 
     delay(min(sleepTime, EXECUTION_PERIOD));
 
-    afficherDonnees();
-    //printAllData();
+    printAllData();
 }
