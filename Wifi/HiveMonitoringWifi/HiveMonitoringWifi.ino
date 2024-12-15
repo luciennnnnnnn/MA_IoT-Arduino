@@ -4,6 +4,7 @@
 #include "AHT20.h"
 #include "SwitchHandler.h"
 #include <math.h>
+#include <CayenneLPP.h>
 
 // Déclarations globales
 #define SEUIL_FERME 100         // Distance en mm pour considérer "fermé"
@@ -28,6 +29,29 @@ bool enFermeture = false;
 bool controleAutomatique = true; // Active le contrôle automatique par température
 String positionDemandee = "Fermé";
 const char* descriptionDistance = "";
+CayenneLPP lpp(51); // Taille du buffer pour le payload
+int dernierEtatMouvement = 0;
+int etatDistance = 0; 
+
+CayenneLPP dataToSend(CayenneLPP lpp) {
+    lpp.reset();
+
+    afficherDonnees(); // Afficher toutes les données avant envoi pour debug
+
+    lpp.addDigitalInput(1, dernierEtatMouvement); // État du mouvement
+    lpp.addDigitalInput(2, etatDistance);        // État de la distance
+    lpp.addTemperature(3, temperature);         // Température
+    lpp.addRelativeHumidity(4, humidity * 100); // Humidité relative
+
+    /*Serial.print("CayenneLPP Payload: ");
+    for (size_t i = 0; i < lpp.getSize(); i++) {
+        Serial.print(lpp.getBuffer()[i], HEX);
+        Serial.print(" ");
+    }
+    Serial.println();*/
+
+    return lpp;
+}
 
 // Fonction pour retourner l'angle du servo
 int getAngle() {
@@ -193,6 +217,10 @@ void loop() {
     }
 
     // Afficher les données dans le terminal
-    afficherDonnees();
+    //afficherDonnees();
+
+    // Envoi périodique du payload CayenneLPP
+    dataToSend(lpp);
+
     delay(50);
 }
