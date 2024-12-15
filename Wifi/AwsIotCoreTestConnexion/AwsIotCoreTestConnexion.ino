@@ -4,30 +4,20 @@
 
 void setup() {
   Serial.begin(115200);
-
-  // Connect to WiFi
-  Serial.println("Connecting to WiFi...");
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
     delay(1000);
     Serial.print(".");
   }
-  Serial.println("\nConnected to WiFi.");
+  Serial.println("\nConnecté au WiFi.");
 
-  // Set up TLS certificates
   net.setCACert(root_ca);
-  net.setCertificate(certificate);
-  net.setPrivateKey(private_key);
 
-  // Test connection to AWS IoT Core
-  Serial.println("Connecting to AWS IoT Core...");
+  Serial.println("Test de connexion TLS...");
   if (!net.connect(aws_endpoint, 8883)) {
-    Serial.println("TLS connection failed. Possible reasons:");
-    Serial.println("1. Invalid Root CA, certificate, or private key.");
-    Serial.println("2. Incorrect AWS IoT endpoint.");
-    Serial.println("3. Time not synchronized.");
+    Serial.println("Échec de la connexion TLS.");
   } else {
-    Serial.println("TLS connection successful!");
+    Serial.println("Connexion TLS réussie !");
   }
 }
 
