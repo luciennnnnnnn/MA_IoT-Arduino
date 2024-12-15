@@ -1,67 +1,77 @@
 #include <CayenneLPP.h>
 #include "Seeed_vl53l0x.h"
 #include "LIS3DHTR.h"
-#include "src/SwitchHandler.h"
+#include "SwitchHandler.h"
 #include "AHT20.h"
 #include <math.h> // For sqrt and fabs
 #include <Arduino.h>
 #include <LbmWm1110.hpp>
 #include <Lbmx.hpp>
+#include <Servo.h>
 
-// Define serial port
+// --- Configuration et constantes ---
 #undef SERIAL
 #define SERIAL Serial
+#define SEUIL_FERME 100         // Distance en mm pour considérer "fermé"
+#define SEUIL_OUVERT 500        // Distance en mm pour considérer "ouvert"
+#define SEUIL_NORME 0.3         // Seuil de variation de la norme vectorielle
+#define TEMPORISATION_STATIQUE 5 // Cycles pour confirmer l'état statique
+#define TEMP_FERMETURE 24.0     // Température pour fermer la porte
+#define TEMP_OUVERTURE 23.7     // Température pour ouvrir la porte
+#define SWITCH_PIN 15
+#define SERVO_PIN 13
 
-// Define constants for thresholds
-#define SEUIL_FERME 100         // Distance in mm to consider "closed"
-#define SEUIL_OUVERT 500        // Distance in mm to consider "open"
-#define SEUIL_NORME 0.3         // Threshold for vector norm variation
-#define TEMPORISATION_STATIQUE 5 // Cycles needed to confirm static state
-
-// Global variables
+// --- Variables globales ---
 float humidity = 0, temperature = 0;
 int etatDistance = 0;
 float lastNorme = 0.0;
 int compteurStatique = 0;
 int dernierEtatMouvement = 1;
-float ax = 0;
-float ay = 0;
-float az = 0;
-int distance  = 0;
+float ax = 0, ay = 0, az = 0;
+int distance = 0;
+int angleActuel = 0;
 const char* descriptionDistance = "";
 const char* descriptionSwitch = "";
 const char* descriptionMouvement = "";
+String positionDemandee = "Fermé";
+bool enOuverture = false;
+bool enFermeture = false;
+bool controleAutomatique = true; // Active le contrôle automatique par température
 
-// Function to calculate vector norm
+// --- Objets capteurs et moteurs ---
+Seeed_vl53l0x VL53L0X;
+LIS3DHTR<TwoWire> LIS;
+#define WIRE Wire
+SwitchHandler switchHandler(SWITCH_PIN);
+AHT20 AHT;
+Servo monServo;
+
+// --- LoRaWAN ---
+enum class StateType { Startup, Joining, Joined, Failed };
+static constexpr smtc_modem_region_t REGION = SMTC_MODEM_REGION_EU_868;
+static const uint8_t DEV_EUI[8]  = { 0x2C, 0xF7, 0xF1, 0xF0, 0x61, 0x90, 0x00, 0x67 };
+static const uint8_t JOIN_EUI[8] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+static const uint8_t APP_KEY[16] = { 0x54, 0x98, 0x8D, 0x11, 0xBD, 0xC0, 0xDD, 0xD1, 0xAB, 0x2F, 0x69, 0x91, 0x71, 0xFD, 0x40, 0x2A };
+static constexpr uint32_t FIRST_UPLINK_DELAY = 10;  // [sec.]
+static constexpr uint32_t UPLINK_PERIOD = 600;      // [sec.]
+static constexpr uint8_t UPLINK_FPORT = 3;
+static constexpr uint32_t EXECUTION_PERIOD = 50;   // [msec.]
+static constexpr uint8_t SEND_BYTES_LENGTH = 51;
+static LbmWm1110& lbmWm1110 = LbmWm1110::getInstance();
+static StateType state = StateType::Startup;
+
+// --- Fonctions auxiliaires ---
 float calculerNorme(float x, float y, float z) {
     return sqrt(x * x + y * y + z * z);
 }
 
-// Function to calculate a moving average
 float calculerMoyenne(float ancienneValeur, float nouvelleValeur, float facteur) {
     return (ancienneValeur * (1.0 - facteur)) + (nouvelleValeur * facteur);
 }
 
-// VL53L0X Time-of-Flight sensor object
-Seeed_vl53l0x VL53L0X;
-
-// LIS3DHTR accelerometer object
-LIS3DHTR<TwoWire> LIS;
-#define WIRE Wire
-
-// Define pin for the switch and switch handler object
-#define SWITCH_PIN 14
-SwitchHandler switchHandler(SWITCH_PIN);
-
-// AHT20 temperature and humidity sensor object
-AHT20 AHT;
-
-// Function to prepare CayenneLPP payload
 CayenneLPP dataToSend(CayenneLPP lpp) {
     lpp.reset();
-
     printAllData();
-
     lpp.addDigitalInput(1, dernierEtatMouvement);
     lpp.addDigitalInput(2, etatDistance);
     lpp.addTemperature(3, temperature);
@@ -77,23 +87,7 @@ CayenneLPP dataToSend(CayenneLPP lpp) {
     return lpp;
 }
 
-// LoRaWAN constants and variables
-enum class StateType { Startup, Joining, Joined, Failed };
-static constexpr smtc_modem_region_t REGION = SMTC_MODEM_REGION_EU_868;
-static const uint8_t DEV_EUI[8]  = { 0x2C, 0xF7, 0xF1, 0xF0, 0x61, 0x90, 0x00, 0x67 };
-static const uint8_t JOIN_EUI[8] = { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
-static const uint8_t APP_KEY[16] = { 0x54, 0x98, 0x8D, 0x11, 0xBD, 0xC0, 0xDD, 0xD1, 0xAB, 0x2F, 0x69, 0x91, 0x71, 0xFD, 0x40, 0x2A };
-
-static constexpr uint32_t FIRST_UPLINK_DELAY = 10;  // [sec.]
-//static constexpr uint32_t UPLINK_PERIOD = 30;      // [sec.] (debug)
-static constexpr uint32_t UPLINK_PERIOD = 600;      // [sec.] avoid network saturation
-static constexpr uint8_t UPLINK_FPORT = 3;
-static constexpr uint32_t EXECUTION_PERIOD = 50;   // [msec.]
-static constexpr uint8_t SEND_BYTES_LENGTH = 51;
-
-static LbmWm1110& lbmWm1110 = LbmWm1110::getInstance();
-static StateType state = StateType::Startup;
-
+// --- Gestion des évènements LoRaWAN ---
 class MyLbmxEventHandlers : public LbmxEventHandlers {
 protected:
     void reset(const LbmxEvent& event) override;
@@ -130,20 +124,59 @@ void MyLbmxEventHandlers::alarm(const LbmxEvent& event) {
     if (LbmxEngine::startAlarm(UPLINK_PERIOD) != SMTC_MODEM_RC_OK) abort();
 }
 
-static void ModemEventHandler() {
-    static LbmxEvent event;
-    static MyLbmxEventHandlers handlers;
-
-    while (event.fetch()) {
-        printf("----- %s -----\n", event.getEventString().c_str());
-        handlers.invoke(event);
+// --- Contrôle du servo ---
+void ouvrir() {
+    if (angleActuel + 5 <= 180) {
+        angleActuel += 5;
+        monServo.write(angleActuel);
+        delay(15);
     }
 }
 
-void printAccelerometerData(float ax, float ay, float az, int dernierEtatMouvement,  const char* descriptionMouvement)
-{
-     SERIAL.print("Accéléromètre : X");
-    SERIAL.print(ax, 2); // Limiter à 2 décimales
+void fermer() {
+    if (angleActuel - 5 >= 0) {
+        angleActuel -= 5;
+        monServo.write(angleActuel);
+        delay(15);
+    }
+}
+
+void gererOuverture() {
+    if (distance >= SEUIL_OUVERT) {
+        enOuverture = false;
+        Serial.println("Position ouverte atteinte.");
+    } else {
+        ouvrir();
+    }
+}
+
+void gererFermeture() {
+    if (distance <= SEUIL_FERME) {
+        enFermeture = false;
+        Serial.println("Position fermée atteinte.");
+    } else {
+        fermer();
+    }
+}
+
+void controleParTemperature() {
+    if (temperature >= TEMP_FERMETURE && positionDemandee != "Fermé") {
+        positionDemandee = "Fermé";
+        enOuverture = false;
+        enFermeture = true;
+        Serial.println("Température élevée, fermeture automatique de la porte.");
+    } else if (temperature <= TEMP_OUVERTURE && positionDemandee != "Ouvert") {
+        positionDemandee = "Ouvert";
+        enOuverture = true;
+        enFermeture = false;
+        Serial.println("Température basse, ouverture automatique de la porte.");
+    }
+}
+
+// --- Gestion des capteurs et affichage ---
+void printAccelerometerData(float ax, float ay, float az, int dernierEtatMouvement, const char* descriptionMouvement) {
+    SERIAL.print("Accéléromètre : X");
+    SERIAL.print(ax, 2);
     SERIAL.print(" Y");
     SERIAL.print(ay, 2);
     SERIAL.print(" Z");
@@ -155,8 +188,7 @@ void printAccelerometerData(float ax, float ay, float az, int dernierEtatMouveme
     SERIAL.println(")");
 }
 
-void printDistanceData(float distance, const char* descriptionDistance)
-{
+void printDistanceData(float distance, const char* descriptionDistance) {
     SERIAL.print("Distance du capteur : ");
     SERIAL.print(distance);
     SERIAL.print(" mm, État de la porte : ");
@@ -166,46 +198,132 @@ void printDistanceData(float distance, const char* descriptionDistance)
     SERIAL.println(")");
 }
 
-void printTempHumidityData()
-{
+void printTempHumidityData() {
     SERIAL.print("Température : ");
     SERIAL.print(temperature);
     SERIAL.print(" °C, Humidité : ");
-    SERIAL.print(humidity * 100); // Multiplier par 100 pour obtenir le pourcentage
+    SERIAL.print(humidity * 100);
     SERIAL.println(" %");
 }
 
-void printSwitchData()
-{
-    SERIAL.print("État du switch : ");
-    SERIAL.println(descriptionSwitch);
-}
-
-void printAllData()
-{
+void printAllData() {
     printAccelerometerData(ax, ay, az, dernierEtatMouvement, descriptionMouvement);
     printDistanceData(distance, descriptionDistance);
     printTempHumidityData();
 }
 
+static void ModemEventHandler() {
+    static LbmxEvent event;
+    static MyLbmxEventHandlers handlers;
+
+    while (event.fetch()) {
+        printf("----- %s -----\n", event.getEventString().c_str());
+        handlers.invoke(event);
+    }
+}
+
+void mesurerDistance() {
+    VL53L0X_RangingMeasurementData_t RangingMeasurementData;
+
+    // Effectuer une mesure de distance
+    VL53L0X.PerformContinuousRangingMeasurement(&RangingMeasurementData);
+
+    // Vérifier si la distance est valide
+    if (RangingMeasurementData.RangeMilliMeter > 0 && RangingMeasurementData.RangeMilliMeter < 2000) {
+        distance = RangingMeasurementData.RangeMilliMeter;
+
+        // Déterminer l'état de la porte et sa description
+        if (distance <= SEUIL_FERME) {
+            etatDistance = 1;
+            descriptionDistance = "fermé";
+        } else if (distance >= SEUIL_OUVERT) {
+            etatDistance = 3;
+            descriptionDistance = "ouvert";
+        } else {
+            etatDistance = 2;
+            descriptionDistance = "en mouvement";
+        }
+    } else {
+        // Si la distance est hors de portée
+        distance = -1; // Indiquer une valeur invalide
+        etatDistance = 3; // Peut être interprété comme "ouvert"
+        descriptionDistance = "hors portée";
+        SERIAL.println("Distance: Hors de portée");
+    }
+}
+
+void mesurerTemperatureHumidite() {
+    if (!AHT.getSensor(&humidity, &temperature)) {
+        Serial.println("Erreur de lecture du capteur AHT20!");
+    }
+}
+
+int getAngle() {
+    return angleActuel;
+}
+
+void afficherDonnees() {
+    Serial.print("Distance: ");
+    Serial.print(distance);
+    Serial.print(" mm | Position demandée: ");
+    Serial.print(positionDemandee);
+    Serial.print(" | État actuel: ");
+    Serial.print(descriptionDistance);
+    Serial.print(" | Angle moteur: ");
+    Serial.print(getAngle());
+    Serial.print(" | Température: ");
+    Serial.print(temperature);
+    Serial.print(" °C | Humidité: ");
+    Serial.print(humidity * 100);
+    Serial.println(" %");
+}
+
+
+void rucheEnMouvement()
+{
+  ax = LIS.getAccelerationX();
+    ay = LIS.getAccelerationY();
+    az = LIS.getAccelerationZ();
+
+    float normeActuelle = calculerNorme(ax, ay, az);
+    float normeLisse = calculerMoyenne(lastNorme, normeActuelle, 0.1);
+    lastNorme = normeLisse;
+
+    float variationNorme = fabs(normeLisse - normeActuelle);
+    int nouvelEtatMouvement = (variationNorme > SEUIL_NORME) ? 2 : 1;
+
+    if (nouvelEtatMouvement == 1) {
+        compteurStatique++;
+        if (compteurStatique >= TEMPORISATION_STATIQUE) {
+            dernierEtatMouvement = 1;
+        }
+    } else {
+        compteurStatique = 0;
+        dernierEtatMouvement = 2;
+    }
+    descriptionMouvement = (dernierEtatMouvement == 2) ? "en mouvement" : "statique";
+
+    VL53L0X_RangingMeasurementData_t RangingMeasurementData;
+    VL53L0X.PerformContinuousRangingMeasurement(&RangingMeasurementData);
+}
+
+// --- Initialisation ---
 void setup() {
     delay(1000);
     printf("\n---------- STARTUP ----------\n");
 
+    monServo.attach(SERVO_PIN);
+    monServo.write(angleActuel);
     lbmWm1110.begin();
     LbmxEngine::begin(lbmWm1110.getRadio(), ModemEventHandler);
-    LbmxEngine::printVersions(lbmWm1110.getRadio());
 
-    // Initialize serial communication for debugging
     SERIAL.begin(115200);
     while (!SERIAL);
 
-    // Initialize sensors
     if (VL53L0X.VL53L0X_common_init() != VL53L0X_ERROR_NONE) {
         SERIAL.println("Failed to initialize VL53L0X!");
         while (1);
     }
-
     VL53L0X.VL53L0X_continuous_ranging_init();
 
     WIRE.begin();
@@ -220,87 +338,19 @@ void setup() {
     AHT.begin();
 }
 
+// --- Boucle principale ---
 void loop() {
-    // Lire l'état du switch
-    bool switchState = switchHandler.readSwitch();
-    descriptionSwitch = switchState ? "pressé" : "relaché";
+    const uint32_t sleepTime = LbmxEngine::doWork();
 
-    // Afficher l'état du switch
-    //printSwitchData();
+    rucheEnMouvement();
 
-    // ----- Capteur d'accélération -----
-    if (!LIS.isConnection()) {
-        SERIAL.println("LIS3DHTR disconnected!");
-        while (1);
-    }
 
-    // Lire les valeurs de l'accéléromètre
-    ax = LIS.getAccelerationX();
-    ay = LIS.getAccelerationY();
-    az = LIS.getAccelerationZ();
 
-    // Calculer la norme vectorielle et lisser les variations
-    float normeActuelle = calculerNorme(ax, ay, az);
-    float normeLisse = calculerMoyenne(lastNorme, normeActuelle, 0.1); // Facteur de lissage 0.1
-    lastNorme = normeLisse;
-
-    // Déterminer si la variation de la norme dépasse le seuil
-    float variationNorme = fabs(normeLisse - normeActuelle);
-    int nouvelEtatMouvement = (variationNorme > SEUIL_NORME) ? 2 : 1;
-
-    // Appliquer une temporisation pour confirmer l'état statique
-    if (nouvelEtatMouvement == 1) {
-        compteurStatique++;
-        if (compteurStatique >= TEMPORISATION_STATIQUE) {
-            dernierEtatMouvement = 1; // Confirmer statique
-        }
-    } else {
-        compteurStatique = 0; // Réinitialiser le compteur si en mouvement
-        dernierEtatMouvement = 2;
-    }
-
-    descriptionMouvement = (dernierEtatMouvement == 2) ? "en mouvement" : "statique";
-
-    // Affichage formaté pour l'accéléromètre
-    //printAccelerometerData(ax, ay, az, dernierEtatMouvement, descriptionMouvement);
-
-    // ----- Capteur de distance -----
-    VL53L0X_RangingMeasurementData_t RangingMeasurementData;
-    VL53L0X.PerformContinuousRangingMeasurement(&RangingMeasurementData);
-
-    etatDistance = 0; // Par défaut
-    descriptionDistance = "";
-    if (RangingMeasurementData.RangeMilliMeter >= 2000) {
-        SERIAL.println("Distance: Hors de portée");
-        etatDistance = 3; // Considérer comme "ouvert" si hors de portée
-        descriptionDistance = "ouvert";
-    } else {
-        distance = RangingMeasurementData.RangeMilliMeter;
-        if (distance <= SEUIL_FERME) {
-            etatDistance = 1; // Fermé
-            descriptionDistance = "fermé";
-        } else if (distance >= SEUIL_OUVERT) {
-            etatDistance = 3; // Ouvert
-            descriptionDistance = "ouvert";
-        } else {
-            etatDistance = 2; // En mouvement
-            descriptionDistance = "en mouvement";
-        }
-
-        // Affichage formaté pour la distance et l'état de la porte
-        //printDistanceData(distance, descriptionDistance);
-    }
-
-    // ----- Capteur de température et d'humidité -----
-    bool ahtSuccess = AHT.getSensor(&humidity, &temperature);
-    if (ahtSuccess) {
-        //printTempHumidityData();
-    } else {
+    if (!AHT.getSensor(&humidity, &temperature)) {
         SERIAL.println("Erreur de lecture du capteur AHT20 !");
     }
 
-     switch (state)
-    {
+    switch (state) {
     case StateType::Startup:
         ledOff(LED_BUILTIN);
         break;
@@ -315,9 +365,44 @@ void loop() {
         break;
     }
 
-    const uint32_t sleepTime = LbmxEngine::doWork();
+    // Lecture de l'état du switch
+    bool switchState = switchHandler.readSwitch();
+
+    // Si le switch est activé, désactiver le contrôle automatique et basculer manuellement
+    if (switchState) {
+        //controleAutomatique = false; // Désactive le contrôle automatique
+        if (positionDemandee == "Ouvert") {
+            positionDemandee = "Fermé";
+            enFermeture = true;
+            enOuverture = false;
+            Serial.println("Switch activé : fermeture manuelle.");
+        } else {
+            positionDemandee = "Ouvert";
+            enOuverture = true;
+            enFermeture = false;
+            Serial.println("Switch activé : ouverture manuelle.");
+        }
+    }
+
+    // Lecture des capteurs
+    mesurerDistance();
+    mesurerTemperatureHumidite();
+
+    // Contrôle automatique si activé
+    if (controleAutomatique) {
+        controleParTemperature();
+    }
+
+    // Gestion de l'ouverture et de la fermeture
+    if (enOuverture) {
+        gererOuverture();
+    }
+    if (enFermeture) {
+        gererFermeture();
+    }
 
     delay(min(sleepTime, EXECUTION_PERIOD));
 
+    afficherDonnees();
     //printAllData();
 }

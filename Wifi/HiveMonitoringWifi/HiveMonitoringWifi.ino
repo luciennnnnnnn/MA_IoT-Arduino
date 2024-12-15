@@ -53,6 +53,34 @@ CayenneLPP dataToSend(CayenneLPP lpp) {
     return lpp;
 }
 
+void rucheEnMouvement()
+{
+  ax = LIS.getAccelerationX();
+    ay = LIS.getAccelerationY();
+    az = LIS.getAccelerationZ();
+
+    float normeActuelle = calculerNorme(ax, ay, az);
+    float normeLisse = calculerMoyenne(lastNorme, normeActuelle, 0.1);
+    lastNorme = normeLisse;
+
+    float variationNorme = fabs(normeLisse - normeActuelle);
+    int nouvelEtatMouvement = (variationNorme > SEUIL_NORME) ? 2 : 1;
+
+    if (nouvelEtatMouvement == 1) {
+        compteurStatique++;
+        if (compteurStatique >= TEMPORISATION_STATIQUE) {
+            dernierEtatMouvement = 1;
+        }
+    } else {
+        compteurStatique = 0;
+        dernierEtatMouvement = 2;
+    }
+    descriptionMouvement = (dernierEtatMouvement == 2) ? "en mouvement" : "statique";
+
+    VL53L0X_RangingMeasurementData_t RangingMeasurementData;
+    VL53L0X.PerformContinuousRangingMeasurement(&RangingMeasurementData);
+}
+
 // Fonction pour retourner l'angle du servo
 int getAngle() {
     return angleActuel;
@@ -185,7 +213,7 @@ void loop() {
 
     // Si le switch est activé, désactiver le contrôle automatique et basculer manuellement
     if (switchState) {
-        controleAutomatique = false; // Désactive le contrôle automatique
+        //controleAutomatique = false; // Désactive le contrôle automatique
         if (positionDemandee == "Ouvert") {
             positionDemandee = "Fermé";
             enFermeture = true;
@@ -216,6 +244,8 @@ void loop() {
         gererFermeture();
     }
 
+	rucheEnMouvement();
+	
     // Afficher les données dans le terminal
     //afficherDonnees();
 
