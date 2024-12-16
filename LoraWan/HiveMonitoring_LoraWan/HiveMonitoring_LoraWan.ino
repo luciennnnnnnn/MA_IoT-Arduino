@@ -35,6 +35,7 @@ int angleActuel = 0;
 const char* descriptionDistance = "";
 const char* descriptionSwitch = "";
 const char* descriptionMouvement = "";
+const char* descriptionMode = "";
 String positionDemandee = "Fermé";
 bool enOuverture = false;
 bool enFermeture = false;
@@ -115,6 +116,12 @@ void printAllData() {
 
     SERIAL.print("Mouvement: ");
     SERIAL.print(descriptionMouvement);
+    SERIAL.println();
+
+    descriptionMode = controleAutomatique ? "auto" : "manuel";
+
+    SERIAL.print("\nMode: ");
+    SERIAL.print(descriptionMode);
     SERIAL.println();
 }
 

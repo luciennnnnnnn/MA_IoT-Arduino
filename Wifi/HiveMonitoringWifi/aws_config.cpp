@@ -7,8 +7,8 @@ const char* subscribeTopic = "subscribe/esp32/downlink";
 const char* publishTopic = "publish/esp32/uplink";
 
 // Configuration WiFi
-const char* ssid = "";
-const char* password = "";
+const char* ssid = "vmd-11209";
+const char* password = "49vw-87kg-nrcb-zsxv";
 
 // Endpoint AWS IoT Core
 const char* aws_endpoint = "a2v2z8f3sbcm46-ats.iot.eu-west-1.amazonaws.com";
