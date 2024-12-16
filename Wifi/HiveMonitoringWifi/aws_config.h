@@ -9,6 +9,7 @@ extern WiFiClientSecure net;
 extern PubSubClient client;
 extern const char* ThingName;
 extern const char* subscribeTopic;
+extern const char* publishTopic;
 extern const char* ssid;
 extern const char* password;
 extern const char* aws_endpoint;

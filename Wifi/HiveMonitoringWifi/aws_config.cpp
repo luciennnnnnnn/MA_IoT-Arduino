@@ -3,7 +3,8 @@
 WiFiClientSecure net; // Objet pour gérer la connexion sécurisée
 PubSubClient client(net); // Initialisation du client MQTT
 const char* ThingName = "ESP32_Device1";
-const char* subscribeTopic = "testsubscribe/topic";
+const char* subscribeTopic = "subscribe/esp32/downlink";
+const char* publishTopic = "publish/esp32/uplink";
 
 // Configuration WiFi
 const char* ssid = "";

@@ -38,6 +38,8 @@ bool enOuverture = false;
 bool enFermeture = false;
 bool controleAutomatique = true; // Active le contrôle automatique par température
 bool controleManuel = true; // Active le contrôle automatique par switch
+unsigned long previousMillis = 0; // Dernière fois que la fonction a été exécutée
+unsigned long interval = 10000; // Intervalle en millisecondes (startTime en secondes)
 
 // === Objets capteurs et moteurs ===
 Seeed_vl53l0x VL53L0X;
@@ -116,6 +118,7 @@ StaticJsonDocument<256> dataToSend() {
     doc["door"] = etatDistance;
     doc["temperature"] = temperature;
     doc["humidity"] = humidity * 100;
+    doc["device_id"] = ThingName;
 
     // Return the filled document
     return doc;
@@ -128,7 +131,7 @@ void sendData(const StaticJsonDocument<256>& doc) {
     serializeJson(doc, payload, sizeof(payload));
 
     // Publish the payload to the MQTT topic
-    client.publish("test/topic", payload);
+    client.publish(publishTopic, payload);
     Serial.println("Données publiées : ");
     Serial.println(payload); // Print payload for debugging
 }
@@ -375,10 +378,18 @@ void loop() {
     }
     client.loop();
 
-    // Publier des données au format JSON
-    sendData(dataToSend());
+    unsigned long currentMillis = millis(); // Temps écoulé depuis le démarrage de l'arduino
 
-    delay(50);
+    // Vérifiez si l'intervalle est écoulé
+    if (currentMillis - previousMillis >= interval) {
+        previousMillis = currentMillis; // Réinitialisez le temps de référence
+
+        // Publier des données au format JSON
+        sendData(dataToSend());
+    }
+
+    // Autres tâches du programme
+    delay(10); // Petit délai pour éviter d'occuper le processeur
 
     printAllData();
 }
