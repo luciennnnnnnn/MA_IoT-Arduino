@@ -5,6 +5,7 @@
 #include "SwitchHandler.h"
 #include <math.h>
 #include <CayenneLPP.h>
+#include "aws_config.h"
 
 // === Configuration et constantes ===
 #undef SERIAL
@@ -102,24 +103,34 @@ void printAllData() {
 }
 
 /**
- * @brief Prépare les données pour l'envoi via LoRaWAN
+ * @brief Envoi via MQTT
  */
-CayenneLPP dataToSend(CayenneLPP lpp) {
-    lpp.reset();
+// Function to prepare data to send
+StaticJsonDocument<256> dataToSend() {
+    // Create a JSON document to hold data
+    StaticJsonDocument<256> doc;
+    
+    // Fill in the data
     printAllData();
-    lpp.addDigitalInput(1, dernierEtatMouvement);
-    lpp.addDigitalInput(2, etatDistance);
-    lpp.addTemperature(3, temperature);
-    lpp.addRelativeHumidity(4, humidity * 100);
+    doc["is_moving"] = dernierEtatMouvement;
+    doc["door"] = etatDistance;
+    doc["temperature"] = temperature;
+    doc["humidity"] = humidity * 100;
 
-    SERIAL.print("CayenneLPP Payload: ");
-    for (size_t i = 0; i < lpp.getSize(); i++) {
-        SERIAL.print(lpp.getBuffer()[i], HEX);
-        SERIAL.print(" ");
-    }
-    SERIAL.println();
+    // Return the filled document
+    return doc;
+}
 
-    return lpp;
+// Function to send data
+void sendData(const StaticJsonDocument<256>& doc) {
+    // Serialize the JSON document to a payload string
+    char payload[256];
+    serializeJson(doc, payload, sizeof(payload));
+
+    // Publish the payload to the MQTT topic
+    client.publish("test/topic", payload);
+    Serial.println("Données publiées : ");
+    Serial.println(payload); // Print payload for debugging
 }
 
 // === Contrôle du servo moteur ===
@@ -296,6 +307,24 @@ void setup() {
     delay(1000);
     printf("\n---------- STARTUP ----------\n");
 
+    // Configure WiFi
+    WiFi.begin(ssid, password);
+    while (WiFi.status() != WL_CONNECTED) {
+      delay(1000);
+      Serial.print(".");
+    }
+    Serial.println("Connecté au WiFi.");
+
+    // Configure TLS
+    net.setCACert(root_ca);
+    net.setCertificate(certificate);
+    net.setPrivateKey(private_key);
+
+    // Configure MQTT 
+    client.setServer(aws_endpoint, 8883);
+    client.setCallback(callback); // Définir la fonction de rappel
+
+    // Configure sensors
     monServo.attach(SERVO_PIN);
     monServo.write(angleActuel);
 
@@ -339,6 +368,15 @@ void loop() {
     if (enFermeture) {
         gererFermeture();
     }
+
+    // Gestion des données AWS
+    if (!client.connected()) {
+      connectAWS();
+    }
+    client.loop();
+
+    // Publier des données au format JSON
+    sendData(dataToSend());
 
     delay(50);
 
