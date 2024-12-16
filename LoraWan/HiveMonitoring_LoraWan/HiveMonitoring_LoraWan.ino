@@ -41,6 +41,9 @@ bool enOuverture = false;
 bool enFermeture = false;
 bool controleAutomatique = true; // Active le contrôle automatique par température
 bool controleManuel = true; // Active le contrôle automatique par switch
+float latitude = 0;
+float longitude = 0;
+float altitude = 0;
 
 // === Objets capteurs et moteurs ===
 Seeed_vl53l0x VL53L0X;
@@ -78,6 +81,13 @@ float calculerNorme(float x, float y, float z) {
  */
 float calculerMoyenne(float ancienneValeur, float nouvelleValeur, float facteur) {
     return (ancienneValeur * (1.0 - facteur)) + (nouvelleValeur * facteur);
+}
+
+void getGps()
+{
+  latitude = 46.5233972;
+  longitude = 6.6097495;
+  altitude = 495;
 }
 
 // === Affichage des données ===
@@ -135,7 +145,8 @@ CayenneLPP dataToSend(CayenneLPP lpp) {
     lpp.addDigitalInput(2, etatDistance);
     lpp.addTemperature(3, temperature);
     lpp.addRelativeHumidity(4, humidity * 100);
-
+	lpp.addGPS(5, latitude, longitude, altitude);	
+		
     SERIAL.print("CayenneLPP Payload: ");
     for (size_t i = 0; i < lpp.getSize(); i++) {
         SERIAL.print(lpp.getBuffer()[i], HEX);
@@ -400,7 +411,8 @@ void loop() {
     mesurerRucheEnMouvement();
     mesurerTemperatureHumidite();
     mesurerDistance();
-
+	getGps();
+	
     if (controleManuel){
         controleParSwitch();
     }

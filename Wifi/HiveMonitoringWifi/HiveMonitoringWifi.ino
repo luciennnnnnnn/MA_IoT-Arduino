@@ -41,6 +41,9 @@ bool controleAutomatique = true; // Active le contrôle automatique par tempéra
 bool controleManuel = true; // Active le contrôle automatique par switch
 unsigned long previousMillis = 0; // Dernière fois que la fonction a été exécutée
 unsigned long interval = 10000; // Intervalle en millisecondes (startTime en secondes)
+float latitude = 0;
+float longitude = 0;
+float altitude = 0;
 
 // === Objets capteurs et moteurs ===
 Seeed_vl53l0x VL53L0X;
@@ -64,6 +67,13 @@ float calculerNorme(float x, float y, float z) {
  */
 float calculerMoyenne(float ancienneValeur, float nouvelleValeur, float facteur) {
     return (ancienneValeur * (1.0 - facteur)) + (nouvelleValeur * facteur);
+}
+
+void getGps()
+{
+  latitude = 46.5233972;
+  longitude = 6.6097495;
+  altitude = 495;
 }
 
 // === Affichage des données ===
@@ -126,6 +136,8 @@ StaticJsonDocument<256> dataToSend() {
     doc["temperature"] = temperature;
     doc["humidity"] = humidity * 100;
     doc["device_id"] = ThingName;
+    doc["latitude"] = latitude;
+    doc["longitude"] = longitude;
 
     // Return the filled document
     return doc;
@@ -364,6 +376,7 @@ void loop() {
     mesurerRucheEnMouvement();
     mesurerTemperatureHumidite();
     mesurerDistance();
+    getGps();
 
     if (controleManuel){
         controleParSwitch();
