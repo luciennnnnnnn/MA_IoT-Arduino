@@ -4,7 +4,7 @@
 #include <ArduinoJson.h>
 
 
-
+extern bool rucheON;
 extern WiFiClientSecure net;
 extern PubSubClient client;
 extern const char* ThingName;

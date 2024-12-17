@@ -45,6 +45,7 @@ float latitude = 0;
 float longitude = 0;
 float altitude = 0;
 
+
 // === Objets capteurs et moteurs ===
 Seeed_vl53l0x VL53L0X;
 LIS3DHTR<TwoWire> LIS;
@@ -371,6 +372,21 @@ void setup() {
     AHT.begin();
 }
 
+// Fonction pour gérer le mode ON/OFF
+void gestionModeONOFF() {
+    if (rucheON) {
+        // Ruche activée
+        Serial.println("La ruche est ALLUMÉE.");
+        // Placez ici le code à exécuter lorsque la ruche est en mode ON
+        monServo.write(90); // Exemple : régler l'angle du servo sur 90° (au besoin)
+    } else {
+        // Ruche désactivée
+        Serial.println("La ruche est ÉTEINTE.");
+        // Placez ici le code à exécuter lorsque la ruche est en mode OFF
+        monServo.write(0); // Exemple : fermer complètement le servo
+    }
+}
+
 // === Boucle principale ===
 void loop() {
     mesurerRucheEnMouvement();
@@ -378,34 +394,44 @@ void loop() {
     mesurerDistance();
     getGps();
 
-    if (controleManuel){
+     if (controleManuel){
         controleParSwitch();
-    }
-    if (controleAutomatique) {
+      }
+      if (controleAutomatique) {
         controleParTemperature();
+      }
+
+      if (enOuverture) {
+          gererOuverture();
+      }
+
+      // Gestion des données AWS
+      if (!client.connected()) {
+        connectAWS();
+      }
+      client.loop();
+
+      unsigned long currentMillis = millis(); // Temps écoulé depuis le démarrage de l'arduino
+
+      // Vérifiez si l'intervalle est écoulé
+      if (currentMillis - previousMillis >= interval) {
+          previousMillis = currentMillis; // Réinitialisez le temps de référence
+
+          // Publier des données au format JSON
+          sendData(dataToSend());
+      }
+
+    if(rucheON){
+      controleManuel = true;
+    } else{
+      enFermeture = true;
+      enOuverture = false;
+      controleManuel = false;
+      controleAutomatique = false;
     }
 
-    if (enOuverture) {
-        gererOuverture();
-    }
     if (enFermeture) {
-        gererFermeture();
-    }
-
-    // Gestion des données AWS
-    if (!client.connected()) {
-      connectAWS();
-    }
-    client.loop();
-
-    unsigned long currentMillis = millis(); // Temps écoulé depuis le démarrage de l'arduino
-
-    // Vérifiez si l'intervalle est écoulé
-    if (currentMillis - previousMillis >= interval) {
-        previousMillis = currentMillis; // Réinitialisez le temps de référence
-
-        // Publier des données au format JSON
-        sendData(dataToSend());
+      gererFermeture();
     }
 
     // Autres tâches du programme

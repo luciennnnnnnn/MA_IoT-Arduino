@@ -1,5 +1,5 @@
 #include "aws_config.h"
-
+bool rucheON = true; // allumée par défaut : éteint
 WiFiClientSecure net; // Objet pour gérer la connexion sécurisée
 PubSubClient client(net); // Initialisation du client MQTT
 const char* ThingName = "ESP32_Device1";
@@ -89,31 +89,28 @@ o/ufQJVtMVT8QtPHRh8jrdkPSHCa2XV4cdFyQzR1bldZwgJcJmApzyMZFo6IQ6XU
 rqXRfboQnoZsG4q5WTP468SQvvG5
 -----END CERTIFICATE-----)EOF";
 
-// Fonction de rappel pour les messages MQTT
+// Callback pour réceptionner les messages MQTT
 void callback(char* topic, byte* payload, unsigned int length) {
-  Serial.print("Message reçu sur le topic : ");
-  Serial.println(topic);
+    String message;
 
-  // Convertir le payload en chaîne de caractères
-  char message[length + 1];
-  memcpy(message, payload, length);
-  message[length] = '\0';
-
-  Serial.print("Message : ");
-  Serial.println(message);
-
-  // Si nécessaire, traiter le message JSON
-  StaticJsonDocument<128> doc;
-  DeserializationError error = deserializeJson(doc, message);
-  if (!error) {
-    // Exemple : Afficher une valeur si le message est JSON
-    if (doc.containsKey("command")) {
-      Serial.print("Commande reçue : ");
-      Serial.println(doc["command"].as<String>());
+    // Construire le message à partir du payload
+    for (unsigned int i = 0; i < length; i++) {
+        message += (char)payload[i];
     }
-  } else {
-    Serial.println("Erreur de parsing du message JSON.");
-  }
+
+    Serial.print("Message reçu sur le topic : ");
+    Serial.println(topic);
+    Serial.print("Payload : ");
+    Serial.println(message);
+
+    // Vérifier la commande reçue : ON ou OFF
+    if (message == "ON") {
+        rucheON = true;  // Allumer
+        Serial.println("Commande reçue : Ruche ON");
+    } else if (message == "OFF") {
+        rucheON = false; // Éteindre
+        Serial.println("Commande reçue : Ruche OFF");
+    }
 }
 
 // Fonction pour se connecter à AWS IoT Core
