@@ -3,8 +3,13 @@ bool rucheON = true; // allumée par défaut : éteint
 WiFiClientSecure net; // Objet pour gérer la connexion sécurisée
 PubSubClient client(net); // Initialisation du client MQTT
 const char* ThingName = "ESP32_Device1";
-const char* subscribeTopic = "subscribe/esp32/downlink";
-const char* publishTopic = "publish/esp32/uplink";
+// Création des topics dynamiques
+String subscribeTopicStr = String("subscribe/") + ThingName + "/downlink";
+String publishTopicStr = String("publish/") + ThingName + "/uplink";
+
+// Conversion en const char* pour le MQTT
+const char* subscribeTopic = subscribeTopicStr.c_str();
+const char* publishTopic = publishTopicStr.c_str();
 
 // Configuration WiFi
 const char* ssid = "";
