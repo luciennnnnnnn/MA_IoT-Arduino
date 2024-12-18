@@ -16,8 +16,8 @@
 #define SEUIL_OUVERT 500        // Distance pour "ouvert" en mm
 #define SEUIL_NORME 0.3         // Seuil de variation de la norme vectorielle
 #define TEMPORISATION_STATIQUE 5 // Cycles pour confirmer l'état statique
-#define TEMP_FERMETURE 24.0     // Température pour fermer la porte
-#define TEMP_OUVERTURE 23.7     // Température pour ouvrir la porte
+#define TEMP_FERMETURE 25.0     // Température pour fermer la porte
+#define TEMP_OUVERTURE 24.7     // Température pour ouvrir la porte
 #define SWITCH_PIN 1
 #define SERVO_PIN 2
 
@@ -179,6 +179,32 @@ void fermer() {
         delay(15);
     }
 }
+
+/**
+ * @brief Gère les actions lorsque la ruche est en mode OFF.
+ */
+void gererModeOFF() {
+    // Arrêter les modes manuel et automatique
+    controleManuel = false;
+    controleAutomatique = false;
+
+    // Mettre à jour la position demandée à "Fermé"
+    if (positionDemandee != "Fermé") {
+        positionDemandee = "Fermé";
+        Serial.println("Ruche en mode OFF : fermeture demandée.");
+    }
+
+    // Forcer la fermeture de la porte
+    if (!enFermeture) {
+        enFermeture = true;
+        enOuverture = false;
+        Serial.println("Ruche en mode OFF : fermeture en cours.");
+    }
+
+    // Fermer la porte si ce n'est pas encore fait
+    gererFermeture();
+}
+
 
 /**
  * @brief Gère l'ouverture automatique en fonction de la distance
@@ -394,48 +420,44 @@ void loop() {
     mesurerDistance();
     getGps();
 
-     if (controleManuel){
+    // Gestion des modes
+    if (rucheON) {
+        controleManuel = true; // Activer le contrôle manuel si la ruche est ON
+    } else {
+        gererModeOFF(); // Gérer le mode OFF
+    }
+
+    // Contrôle manuel et automatique si activés
+    if (controleManuel) {
         controleParSwitch();
-      }
-      if (controleAutomatique) {
+    }
+    if (controleAutomatique) {
         controleParTemperature();
-      }
-
-      if (enOuverture) {
-          gererOuverture();
-      }
-
-      // Gestion des données AWS
-      if (!client.connected()) {
-        connectAWS();
-      }
-      client.loop();
-
-      unsigned long currentMillis = millis(); // Temps écoulé depuis le démarrage de l'arduino
-
-      // Vérifiez si l'intervalle est écoulé
-      if (currentMillis - previousMillis >= interval) {
-          previousMillis = currentMillis; // Réinitialisez le temps de référence
-
-          // Publier des données au format JSON
-          sendData(dataToSend());
-      }
-
-    if(rucheON){
-      controleManuel = true;
-    } else{
-      enFermeture = true;
-      enOuverture = false;
-      controleManuel = false;
-      controleAutomatique = false;
     }
 
+    // Gérer ouverture et fermeture automatiques
+    if (enOuverture) {
+        gererOuverture();
+    }
     if (enFermeture) {
-      gererFermeture();
+        gererFermeture();
     }
 
-    // Autres tâches du programme
-    delay(10); // Petit délai pour éviter d'occuper le processeur
+    // Gestion des données AWS
+    if (!client.connected()) {
+        connectAWS();
+    }
+    client.loop();
 
+    // Publication des données périodiques
+    unsigned long currentMillis = millis(); // Temps écoulé depuis le démarrage
+    if (currentMillis - previousMillis >= interval) {
+        previousMillis = currentMillis; // Réinitialiser le temps de référence
+        sendData(dataToSend());
+    }
+
+    // Autres tâches
+    delay(10); // Petit délai pour éviter d'occuper le processeur
     printAllData();
 }
+
