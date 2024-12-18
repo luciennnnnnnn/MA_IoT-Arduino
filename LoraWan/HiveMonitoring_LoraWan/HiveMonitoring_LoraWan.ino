@@ -15,15 +15,20 @@
 
 // Seuils et configurations de capteurs et moteur
 #define SEUIL_FERME 100         // Distance pour "fermé" en mm
-#define SEUIL_OUVERT 500        // Distance pour "ouvert" en mm
+#define SEUIL_OUVERT 200        // Distance pour "ouvert" en mm
 #define SEUIL_NORME 0.3         // Seuil de variation de la norme vectorielle
 #define TEMPORISATION_STATIQUE 5 // Cycles pour confirmer l'état statique
 #define TEMP_FERMETURE 24.0     // Température pour fermer la porte
 #define TEMP_OUVERTURE 23.7     // Température pour ouvrir la porte
 #define SWITCH_PIN 15
 #define SERVO_PIN 13
+#define BUTTON_B_PIN 0 // Remplacez 0 par le GPIO correspondant au bouton B
 
 // === Variables globales ===
+bool lastButtonBState = HIGH; // État précédent du bouton B (non pressé)
+bool currentButtonBState = HIGH; // État actuel du bouton B
+unsigned long lastDebounceTime = 0; // Temps de la dernière lecture stable
+unsigned long debounceDelay = 50; // Temps de rebond (en ms)														
 float humidity = 0, temperature = 0;
 int etatDistance = 0;
 float lastNorme = 0.0;
@@ -44,6 +49,7 @@ bool controleManuel = true; // Active le contrôle automatique par switch
 float latitude = 0;
 float longitude = 0;
 float altitude = 0;
+bool rucheON = true; // allumée par défaut : éteint
 
 // === Objets capteurs et moteurs ===
 Seeed_vl53l0x VL53L0X;
@@ -227,7 +233,30 @@ void fermer() {
         delay(15);
     }
 }
+/**
+ * @brief Gère les actions lorsque la ruche est en mode OFF.
+ */
+void gererModeOFF() {
+    // Arrêter les modes manuel et automatique
+    controleManuel = false;
+    controleAutomatique = false;
 
+    // Mettre à jour la position demandée à "Fermé"
+    if (positionDemandee != "Fermé") {
+        positionDemandee = "Fermé";
+        Serial.println("Ruche en mode OFF : fermeture demandée.");
+    }
+
+    // Forcer la fermeture de la porte
+    if (!enFermeture) {
+        enFermeture = true;
+        enOuverture = false;
+        Serial.println("Ruche en mode OFF : fermeture en cours.");
+    }
+
+    // Fermer la porte si ce n'est pas encore fait
+    gererFermeture();
+}
 /**
  * @brief Gère l'ouverture automatique en fonction de la distance
  */
@@ -261,7 +290,6 @@ void controleParSwitch(){
   descriptionSwitch = switchState ? "pressé" : "relaché";
 
   if(switchState) {
-        controleAutomatique = !controleAutomatique; // Désactive/Active le contrôle automatique
         if (positionDemandee == "Ouvert") {
             positionDemandee = "Fermé";
             enFermeture = true;
@@ -373,11 +401,61 @@ void mesurerRucheEnMouvement() {
     //printAccelerometerData(ax, ay, az, dernierEtatMouvement, descriptionMouvement);
  }
 
+// Fonction pour gérer le mode ON/OFF
+void gestionModeONOFF() {
+    if (rucheON) {
+        // Ruche activée
+        Serial.println("La ruche est ALLUMÉE.");
+        // Placez ici le code à exécuter lorsque la ruche est en mode ON
+        monServo.write(90); // Exemple : régler l'angle du servo sur 90° (au besoin)
+    } else {
+        // Ruche désactivée
+        Serial.println("La ruche est ÉTEINTE.");
+        // Placez ici le code à exécuter lorsque la ruche est en mode OFF
+        monServo.write(0); // Exemple : fermer complètement le servo
+    }
+}
+
+void gererBoutonB() {
+    int reading = digitalRead(BUTTON_B_PIN);
+
+    // Gérer le rebond (debounce)
+    if (reading != lastButtonBState) {
+        lastDebounceTime = millis();
+    }
+
+    if ((millis() - lastDebounceTime) > debounceDelay) {
+        // Si l'état du bouton a changé
+        if (reading != currentButtonBState) {
+            currentButtonBState = reading;
+
+            // Si le bouton est pressé (LOW dans le cas d'un bouton avec pull-up)
+            if (currentButtonBState == LOW) {
+                // Basculer entre les modes manuel et automatique
+                controleAutomatique = !controleAutomatique;
+                controleManuel = !controleAutomatique;
+
+                // Afficher le nouveau mode
+                if (controleAutomatique) {
+                    Serial.println("Mode automatique activé.");
+                } else {
+                    Serial.println("Mode manuel activé.");
+                }
+            }
+        }
+    }
+
+    // Mettre à jour l'état précédent
+    lastButtonBState = reading;
+}
+
+
 // === Initialisation ===
 void setup() {
     delay(1000);
     printf("\n---------- STARTUP ----------\n");
 
+   //pinMode(BUTTON_B_PIN, INPUT_PULLUP); // Configure le bouton B avec un pull-up interne
     monServo.attach(SERVO_PIN);
     monServo.write(angleActuel);
     lbmWm1110.begin();
@@ -407,25 +485,36 @@ void setup() {
 // === Boucle principale ===
 void loop() {
     const uint32_t sleepTime = LbmxEngine::doWork();
+      gererBoutonB(); // Gérer les pressions sur le bouton B
 
     mesurerRucheEnMouvement();
     mesurerTemperatureHumidite();
     mesurerDistance();
-	getGps();
-	
-    if (controleManuel){
+    getGps();
+
+    // Gestion des modes
+    if (rucheON) {
+        controleManuel = true; // Activer le contrôle manuel si la ruche est ON
+    } else {
+        gererModeOFF(); // Gérer le mode OFF
+    }
+
+    // Contrôle manuel et automatique si activés
+    if (controleManuel) {
         controleParSwitch();
     }
     if (controleAutomatique) {
         controleParTemperature();
     }
 
+    // Gérer ouverture et fermeture automatiques
     if (enOuverture) {
         gererOuverture();
     }
     if (enFermeture) {
         gererFermeture();
     }
+
 
     delay(min(sleepTime, EXECUTION_PERIOD));
 
