@@ -12,8 +12,8 @@ const char* subscribeTopic = subscribeTopicStr.c_str();
 const char* publishTopic = publishTopicStr.c_str();
 
 // Configuration WiFi
-const char* ssid = "";
-const char* password = "";
+const char* ssid = "HES-SO Invite";
+const char* password = "cke.bz3s";
 
 // Endpoint AWS IoT Core
 const char* aws_endpoint = "a2v2z8f3sbcm46-ats.iot.eu-west-1.amazonaws.com";
