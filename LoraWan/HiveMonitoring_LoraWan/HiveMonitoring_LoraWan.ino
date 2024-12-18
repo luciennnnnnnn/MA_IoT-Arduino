@@ -45,7 +45,7 @@ String positionDemandee = "Fermé";
 bool enOuverture = false;
 bool enFermeture = false;
 bool controleAutomatique = true; // Active le contrôle automatique par température
-bool controleManuel = true; // Active le contrôle automatique par switch
+bool controleManuel = false;// Active le contrôle automatique par switch
 float latitude = 0;
 float longitude = 0;
 float altitude = 0;
@@ -485,7 +485,7 @@ void setup() {
 // === Boucle principale ===
 void loop() {
     const uint32_t sleepTime = LbmxEngine::doWork();
-      gererBoutonB(); // Gérer les pressions sur le bouton B
+    //gererBoutonB(); // Gérer les pressions sur le bouton B //Charger la bonne pin et décommenter
 
     mesurerRucheEnMouvement();
     mesurerTemperatureHumidite();
@@ -494,7 +494,7 @@ void loop() {
 
     // Gestion des modes
     if (rucheON) {
-        controleManuel = true; // Activer le contrôle manuel si la ruche est ON
+        controleManuel = false; // Activer le contrôle manuel si la ruche est ON
     } else {
         gererModeOFF(); // Gérer le mode OFF
     }
