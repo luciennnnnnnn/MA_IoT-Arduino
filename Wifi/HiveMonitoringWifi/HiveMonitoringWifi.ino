@@ -20,8 +20,14 @@
 #define TEMP_OUVERTURE 24.7     // Température pour ouvrir la porte
 #define SWITCH_PIN 1
 #define SERVO_PIN 2
+#define BUTTON_B_PIN 0 // Remplacez 0 par le GPIO correspondant au bouton B
+
 
 // === Variables globales ===
+bool lastButtonBState = HIGH; // État précédent du bouton B (non pressé)
+bool currentButtonBState = HIGH; // État actuel du bouton B
+unsigned long lastDebounceTime = 0; // Temps de la dernière lecture stable
+unsigned long debounceDelay = 50; // Temps de rebond (en ms)
 float humidity = 0, temperature = 0;
 int etatDistance = 0;
 float lastNorme = 0.0;
@@ -239,7 +245,6 @@ void controleParSwitch(){
   descriptionSwitch = switchState ? "pressé" : "relaché";
 
   if(switchState) {
-        controleAutomatique = !controleAutomatique; // Désactive/Active le contrôle automatique
         if (positionDemandee == "Ouvert") {
             positionDemandee = "Fermé";
             enFermeture = true;
@@ -356,6 +361,8 @@ void setup() {
     delay(1000);
     printf("\n---------- STARTUP ----------\n");
 
+    pinMode(BUTTON_B_PIN, INPUT_PULLUP); // Configure le bouton B avec un pull-up interne
+
     // Configure WiFi
     WiFi.begin(ssid, password);
     while (WiFi.status() != WL_CONNECTED) {
@@ -413,8 +420,43 @@ void gestionModeONOFF() {
     }
 }
 
+void gererBoutonB() {
+    int reading = digitalRead(BUTTON_B_PIN);
+
+    // Gérer le rebond (debounce)
+    if (reading != lastButtonBState) {
+        lastDebounceTime = millis();
+    }
+
+    if ((millis() - lastDebounceTime) > debounceDelay) {
+        // Si l'état du bouton a changé
+        if (reading != currentButtonBState) {
+            currentButtonBState = reading;
+
+            // Si le bouton est pressé (LOW dans le cas d'un bouton avec pull-up)
+            if (currentButtonBState == LOW) {
+                // Basculer entre les modes manuel et automatique
+                controleAutomatique = !controleAutomatique;
+                controleManuel = !controleAutomatique;
+
+                // Afficher le nouveau mode
+                if (controleAutomatique) {
+                    Serial.println("Mode automatique activé.");
+                } else {
+                    Serial.println("Mode manuel activé.");
+                }
+            }
+        }
+    }
+
+    // Mettre à jour l'état précédent
+    lastButtonBState = reading;
+}
+
 // === Boucle principale ===
 void loop() {
+    gererBoutonB(); // Gérer les pressions sur le bouton B
+
     mesurerRucheEnMouvement();
     mesurerTemperatureHumidite();
     mesurerDistance();
@@ -460,4 +502,3 @@ void loop() {
     delay(10); // Petit délai pour éviter d'occuper le processeur
     printAllData();
 }
-
